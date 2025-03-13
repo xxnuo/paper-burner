@@ -1,0 +1,1085 @@
+// 全局变量
+let pdfFile = null;
+let markdownContent = '';
+let translationContent = '';
+let imagesData = [];
+
+// DOM 元素
+document.addEventListener('DOMContentLoaded', () => {
+    // API Key 相关
+    const mistralApiKeyInput = document.getElementById('mistralApiKey');
+    const toggleMistralKeyBtn = document.getElementById('toggleMistralKey');
+    const rememberMistralKeyCheckbox = document.getElementById('rememberMistralKey');
+    const translationApiKeyInput = document.getElementById('translationApiKey');
+    const toggleTranslationKeyBtn = document.getElementById('toggleTranslationKey');
+    const rememberTranslationKeyCheckbox = document.getElementById('rememberTranslationKey');
+
+    // 文件上传相关
+    const dropZone = document.getElementById('dropZone');
+    const pdfFileInput = document.getElementById('pdfFileInput');
+    const browseFilesBtn = document.getElementById('browseFilesBtn');
+    const fileInfo = document.getElementById('fileInfo');
+    const fileName = document.getElementById('fileName');
+    const fileSize = document.getElementById('fileSize');
+    const removeFileBtn = document.getElementById('removeFileBtn');
+
+    // 翻译相关
+    const translationModel = document.getElementById('translationModel');
+    const targetLanguage = document.getElementById('targetLanguage');
+
+    // 按钮
+    const processBtn = document.getElementById('processBtn');
+    const downloadMarkdownBtn = document.getElementById('downloadMarkdownBtn');
+    const downloadTranslationBtn = document.getElementById('downloadTranslationBtn');
+
+    // 结果展示
+    const resultsSection = document.getElementById('resultsSection');
+    const markdownPreview = document.getElementById('markdownPreview');
+    const translationPreview = document.getElementById('translationPreview');
+    const translationResultCard = document.getElementById('translationResultCard');
+
+    // 进度相关
+    const progressSection = document.getElementById('progressSection');
+    const progressStep = document.getElementById('progressStep');
+    const progressPercentage = document.getElementById('progressPercentage');
+    const progressBar = document.getElementById('progressBar');
+    const progressLog = document.getElementById('progressLog');
+
+    // 初始化 - 从本地存储加载 API Key
+    if (localStorage.getItem('mistralApiKey')) {
+        mistralApiKeyInput.value = localStorage.getItem('mistralApiKey');
+        rememberMistralKeyCheckbox.checked = true;
+    }
+
+    if (localStorage.getItem('translationApiKey')) {
+        translationApiKeyInput.value = localStorage.getItem('translationApiKey');
+        rememberTranslationKeyCheckbox.checked = true;
+    }
+
+    // API Key 显示/隐藏切换
+    toggleMistralKeyBtn.addEventListener('click', () => {
+        if (mistralApiKeyInput.type === 'password') {
+            mistralApiKeyInput.type = 'text';
+            toggleMistralKeyBtn.innerHTML = '<iconify-icon icon="carbon:view-off" width="20"></iconify-icon>';
+        } else {
+            mistralApiKeyInput.type = 'password';
+            toggleMistralKeyBtn.innerHTML = '<iconify-icon icon="carbon:view" width="20"></iconify-icon>';
+        }
+    });
+
+    toggleTranslationKeyBtn.addEventListener('click', () => {
+        if (translationApiKeyInput.type === 'password') {
+            translationApiKeyInput.type = 'text';
+            toggleTranslationKeyBtn.innerHTML = '<iconify-icon icon="carbon:view-off" width="20"></iconify-icon>';
+        } else {
+            translationApiKeyInput.type = 'password';
+            toggleTranslationKeyBtn.innerHTML = '<iconify-icon icon="carbon:view" width="20"></iconify-icon>';
+        }
+    });
+
+    // API Key 记住选项
+    rememberMistralKeyCheckbox.addEventListener('change', () => {
+        if (rememberMistralKeyCheckbox.checked) {
+            localStorage.setItem('mistralApiKey', mistralApiKeyInput.value);
+        } else {
+            localStorage.removeItem('mistralApiKey');
+        }
+    });
+
+    rememberTranslationKeyCheckbox.addEventListener('change', () => {
+        if (rememberTranslationKeyCheckbox.checked) {
+            localStorage.setItem('translationApiKey', translationApiKeyInput.value);
+        } else {
+            localStorage.removeItem('translationApiKey');
+        }
+    });
+
+    mistralApiKeyInput.addEventListener('input', () => {
+        if (rememberMistralKeyCheckbox.checked) {
+            localStorage.setItem('mistralApiKey', mistralApiKeyInput.value);
+        }
+    });
+
+    translationApiKeyInput.addEventListener('input', () => {
+        if (rememberTranslationKeyCheckbox.checked) {
+            localStorage.setItem('translationApiKey', translationApiKeyInput.value);
+        }
+    });
+
+    // PDF 文件拖放上传
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('border-blue-500', 'bg-blue-50');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        
+        if (e.dataTransfer.files.length > 0 && e.dataTransfer.files[0].type === 'application/pdf') {
+            handleFileSelection(e.dataTransfer.files[0]);
+        } else {
+            showNotification('请上传PDF文件', 'error');
+        }
+    });
+
+    // 浏览文件按钮
+    browseFilesBtn.addEventListener('click', () => {
+        pdfFileInput.click();
+    });
+
+    // 文件选择处理
+    pdfFileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleFileSelection(e.target.files[0]);
+        }
+    });
+
+    // 移除文件
+    removeFileBtn.addEventListener('click', () => {
+        pdfFile = null;
+        fileInfo.classList.add('hidden');
+        pdfFileInput.value = '';
+        updateProcessButtonState();
+    });
+
+    // 处理按钮
+    processBtn.addEventListener('click', async () => {
+        try {
+            const mistralKey = mistralApiKeyInput.value.trim();
+            
+            if (!mistralKey) {
+                showNotification('请输入Mistral API Key', 'error');
+                return;
+            }
+
+            if (!pdfFile) {
+                showNotification('请上传PDF文件', 'error');
+                return;
+            }
+
+            // 开始处理
+            processBtn.disabled = true;
+            showProgressSection();
+            updateProgress('开始处理...', 5);
+            addProgressLog('开始OCR处理...');
+            
+            try {
+                // 执行OCR处理
+                await processPdfWithMistral(mistralKey);
+                
+                // 如果选择了翻译，则执行翻译
+                if (translationModel.value !== 'none') {
+                    const translationKey = translationApiKeyInput.value.trim();
+                    if (translationModel.value !== 'none' && !translationKey) {
+                        showNotification('请输入翻译API Key', 'error');
+                        updateProgress('翻译需要API Key', 100);
+                        addProgressLog('错误: 缺少翻译API Key');
+                        processBtn.disabled = false;
+                        return;
+                    }
+                    updateProgress('开始翻译...', 60);
+                    addProgressLog(`使用${translationModel.value}模型进行翻译...`);
+                    
+                    // 获取文档大小估计
+                    const estimatedTokens = estimateTokenCount(markdownContent);
+                    const tokenLimit = 12000; // 设置一个安全的token限制
+                    
+                    if (estimatedTokens > tokenLimit) {
+                        // 使用分段翻译
+                        showNotification(`文档较大(~${Math.round(estimatedTokens/1000)}K tokens)，将进行分段翻译`, 'info');
+                        translationContent = await translateLongDocument(markdownContent, targetLanguage.value, translationModel.value, translationKey);
+                    } else {
+                        // 直接翻译
+                        translationContent = await translateMarkdown(markdownContent, targetLanguage.value, translationModel.value, translationKey);
+                    }
+                }
+
+                // 显示结果
+                updateProgress('处理完成!', 100);
+                addProgressLog('全部处理完成!');
+                showResultsSection();
+            } catch (error) {
+                console.error('处理错误:', error);
+                showNotification('处理过程中出错: ' + error.message, 'error');
+                addProgressLog('错误: ' + error.message);
+                updateProgress('处理失败', 100);
+            } finally {
+                processBtn.disabled = false;
+            }
+        } catch (error) {
+            console.error('处理错误:', error);
+            showNotification('处理过程中出错: ' + error.message, 'error');
+            addProgressLog('错误: ' + error.message);
+            updateProgress('处理失败', 100);
+            processBtn.disabled = false;
+        }
+    });
+
+    // 下载按钮
+    downloadMarkdownBtn.addEventListener('click', () => {
+        if (markdownContent) {
+            downloadMarkdownWithImages();
+        }
+    });
+
+    downloadTranslationBtn.addEventListener('click', () => {
+        if (translationContent) {
+            //downloadText(translationContent, 'translation.md');
+            downloadTranslationWithImages();
+        }
+    });
+
+    // 翻译模型变更
+    translationModel.addEventListener('change', () => {
+        updateTranslationUIVisibility();
+    });
+
+    // 初始化 UI 状态
+    updateProcessButtonState();
+    updateTranslationUIVisibility();
+});
+
+// 辅助函数
+function handleFileSelection(file) {
+    pdfFile = file;
+    document.getElementById('fileName').textContent = file.name;
+    document.getElementById('fileSize').textContent = formatFileSize(file.size);
+    document.getElementById('fileInfo').classList.remove('hidden');
+    updateProcessButtonState();
+}
+
+function updateProcessButtonState() {
+    const mistralKey = document.getElementById('mistralApiKey').value.trim();
+    const processBtn = document.getElementById('processBtn');
+    processBtn.disabled = !pdfFile || !mistralKey;
+}
+
+function updateTranslationUIVisibility() {
+    const translationModel = document.getElementById('translationModel').value;
+    const translationApiKeySection = document.getElementById('translationApiKey').parentElement;
+    
+    if (translationModel === 'none') {
+        translationApiKeySection.classList.add('opacity-50');
+        document.getElementById('translationApiKey').disabled = true;
+    } else {
+        translationApiKeySection.classList.remove('opacity-50');
+        document.getElementById('translationApiKey').disabled = false;
+    }
+}
+
+function showResultsSection() {
+    document.getElementById('progressSection').classList.add('hidden');
+    document.getElementById('resultsSection').classList.remove('hidden');
+    
+    // 显示Markdown内容
+    document.getElementById('markdownPreview').textContent = markdownContent.substring(0, 500) + '...';
+    
+    // 显示翻译内容（如果有）
+    if (translationContent) {
+        document.getElementById('translationPreview').textContent = translationContent.substring(0, 500) + '...';
+        document.getElementById('translationResultCard').classList.remove('hidden');
+    } else {
+        document.getElementById('translationResultCard').classList.add('hidden');
+    }
+    
+    window.scrollTo({
+        top: document.getElementById('resultsSection').offsetTop - 20,
+        behavior: 'smooth'
+    });
+}
+
+function showProgressSection() {
+    document.getElementById('resultsSection').classList.add('hidden');
+    document.getElementById('progressSection').classList.remove('hidden');
+    document.getElementById('progressLog').innerHTML = '';
+    updateProgress('初始化...', 0);
+    
+    window.scrollTo({
+        top: document.getElementById('progressSection').offsetTop - 20,
+        behavior: 'smooth'
+    });
+}
+
+function updateProgress(stepText, percentage) {
+    document.getElementById('progressStep').textContent = stepText;
+    document.getElementById('progressPercentage').textContent = `${percentage}%`;
+    document.getElementById('progressBar').style.width = `${percentage}%`;
+}
+
+function addProgressLog(text) {
+    const logElement = document.getElementById('progressLog');
+    const timestamp = new Date().toLocaleTimeString();
+    logElement.innerHTML += `<div>[${timestamp}] ${text}</div>`;
+    logElement.scrollTop = logElement.scrollHeight;
+}
+
+function showNotification(message, type = 'info') {
+    // 简单实现，可以替换为更美观的通知
+    alert(message);
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    else if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+    else return (bytes / 1048576).toFixed(2) + ' MB';
+}
+
+// Mistral OCR 处理
+async function processPdfWithMistral(apiKey) {
+    try {
+        addProgressLog('准备PDF文件...');
+        updateProgress('PDF处理准备中', 10);
+        
+        // 检查API密钥长度
+        if (apiKey.length < 30) {
+            throw new Error('Mistral API密钥格式可能不正确，请检查');
+        }
+        
+        // 从上传文件到获取OCR结果的完整流程
+        const formData = new FormData();
+        // 关键点：文件上传字段名必须是file
+        formData.append('file', pdfFile);
+        formData.append('purpose', 'ocr');
+        
+        addProgressLog('准备上传PDF文件...');
+        updateProgress('上传文件中...', 20);
+        addProgressLog('开始上传到Mistral...');
+        
+        console.log('开始上传文件，文件名:', pdfFile.name, '文件大小:', pdfFile.size);
+        
+        // 尝试上传文件
+        let response;
+        try {
+            response = await fetch('https://api.mistral.ai/v1/files', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`
+                    // 不要设置Content-Type，让浏览器自动设置multipart/form-data和boundary
+                },
+                body: formData
+            });
+        } catch (uploadError) {
+            console.error('上传错误详情:', uploadError);
+            addProgressLog(`网络错误: ${uploadError.message || '未知网络错误'}`);
+            throw new Error(`文件上传失败，网络错误: ${uploadError.message || '未知网络错误'}`);
+        }
+        
+        if (!response.ok) {
+            let errorInfo = '未知错误';
+            try {
+                const responseText = await response.text();
+                console.error('上传失败原始响应:', responseText);
+                try {
+                    const jsonError = JSON.parse(responseText);
+                    errorInfo = jsonError.error?.message || jsonError.message || jsonError.detail || responseText;
+                } catch (e) {
+                    errorInfo = responseText || `HTTP错误: ${response.status} ${response.statusText}`;
+                }
+            } catch (e) {
+                errorInfo = `HTTP错误: ${response.status} ${response.statusText}`;
+            }
+            
+            addProgressLog(`上传失败: ${response.status} - ${errorInfo}`);
+            
+            if (response.status === 401) {
+                throw new Error('API密钥无效或未授权，请检查您的Mistral API密钥');
+            } else {
+                throw new Error(`文件上传失败 (${response.status}): ${errorInfo}`);
+            }
+        }
+        
+        let fileData;
+        try {
+            fileData = await response.json();
+            console.log('文件上传响应:', JSON.stringify(fileData));
+        } catch (e) {
+            console.error('解析文件数据错误:', e);
+            throw new Error('无法解析文件上传响应数据');
+        }
+        
+        if (!fileData || !fileData.id) {
+            console.error('文件数据无效:', fileData);
+            throw new Error('上传成功但未返回有效的文件ID');
+        }
+        
+        const fileId = fileData.id;
+        addProgressLog(`文件上传成功，ID: ${fileId}`);
+        updateProgress('获取文件访问权限...', 30);
+        
+        // 确保fileId是有效的字符串
+        if (typeof fileId !== 'string' || fileId.trim() === '') {
+            throw new Error('文件ID无效，无法继续处理');
+        }
+        
+        // 等待一下确保文件已经处理完成
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // 获取签名URL - 使用文档中的确切格式
+        try {
+            // 使用/url端点并传递expiry参数
+            const urlEndpoint = `https://api.mistral.ai/v1/files/${fileId}/url?expiry=24`;
+            console.log('请求签名URL:', urlEndpoint);
+            
+            response = await fetch(urlEndpoint, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Accept': 'application/json'
+                }
+            });
+        } catch (urlError) {
+            console.error('获取URL错误详情:', urlError);
+            addProgressLog(`获取URL错误: ${urlError.message || '未知网络错误'}`);
+            throw new Error(`获取签名URL失败，网络错误: ${urlError.message || '未知网络错误'}`);
+        }
+        
+        if (!response.ok) {
+            let errorInfo = '未知错误';
+            try {
+                const responseText = await response.text();
+                console.error('获取URL失败原始响应:', responseText);
+                try {
+                    const jsonError = JSON.parse(responseText);
+                    errorInfo = jsonError.error?.message || jsonError.message || jsonError.detail || responseText;
+                } catch (e) {
+                    errorInfo = responseText || `HTTP错误: ${response.status} ${response.statusText}`;
+                }
+            } catch (e) {
+                errorInfo = `HTTP错误: ${response.status} ${response.statusText}`;
+            }
+            
+            addProgressLog(`获取签名URL失败: ${response.status} - ${errorInfo}`);
+            throw new Error(`获取签名URL失败 (${response.status}): ${errorInfo}`);
+        }
+        
+        let urlData;
+        try {
+            urlData = await response.json();
+            console.log('签名URL响应:', JSON.stringify(urlData));
+        } catch (e) {
+            console.error('解析URL数据错误:', e);
+            throw new Error('无法解析签名URL响应数据');
+        }
+        
+        if (!urlData || !urlData.url) {
+            console.error('URL数据无效:', urlData);
+            addProgressLog('返回的URL格式不正确');
+            throw new Error('获取的签名URL格式不正确');
+        }
+        
+        const signedUrl = urlData.url;
+        addProgressLog('成功获取文件访问URL');
+        updateProgress('开始OCR处理...', 40);
+        
+        // 进行OCR处理 - 请求体需要匹配最新文档
+        try {
+            response = await fetch('https://api.mistral.ai/v1/ocr', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    // 完全匹配文档示例
+                    model: 'mistral-ocr-latest',
+                    document: {
+                        type: "document_url",
+                        document_url: signedUrl
+                    },
+                    include_image_base64: true
+                })
+            });
+        } catch (ocrError) {
+            console.error('OCR错误详情:', ocrError);
+            addProgressLog(`OCR处理网络错误: ${ocrError.message || '未知网络错误'}`);
+            throw new Error(`OCR处理失败，网络错误: ${ocrError.message || '未知网络错误'}`);
+        }
+        
+        if (!response.ok) {
+            let errorInfo = '未知错误';
+            try {
+                const responseText = await response.text();
+                console.error('OCR处理失败原始响应:', responseText);
+                try {
+                    const jsonError = JSON.parse(responseText);
+                    errorInfo = jsonError.error?.message || jsonError.message || jsonError.detail || responseText;
+                } catch (e) {
+                    errorInfo = responseText || `HTTP错误: ${response.status} ${response.statusText}`;
+                }
+            } catch (e) {
+                errorInfo = `HTTP错误: ${response.status} ${response.statusText}`;
+            }
+            
+            addProgressLog(`OCR处理失败: ${response.status} - ${errorInfo}`);
+            throw new Error(`OCR处理失败 (${response.status}): ${errorInfo}`);
+        }
+        
+        let ocrData;
+        try {
+            ocrData = await response.json();
+            console.log('OCR处理成功，返回数据类型:', typeof ocrData);
+        } catch (e) {
+            console.error('解析OCR数据错误:', e);
+            throw new Error('无法解析OCR处理响应数据');
+        }
+        
+        if (!ocrData || !ocrData.pages) {
+            console.error('OCR数据无效:', ocrData);
+            throw new Error('OCR处理成功但返回的数据格式不正确');
+        }
+        
+        addProgressLog('OCR处理完成，开始生成Markdown');
+        updateProgress('生成Markdown...', 50);
+        
+        // 处理OCR结果
+        await processOcrResults(ocrData);
+        addProgressLog('Markdown生成完成');
+        
+        return true;
+    } catch (error) {
+        console.error('Mistral OCR处理错误:', error);
+        addProgressLog(`处理失败: ${error.message || '未知错误'}`);
+        throw error;
+    }
+}
+
+// 处理OCR结果
+async function processOcrResults(ocrResponse) {
+    try {
+        markdownContent = '';
+        imagesData = [];
+        
+        // 处理每一页
+        for (const page of ocrResponse.pages) {
+            // 处理图片
+            const pageImages = {};
+            
+            for (const img of page.images) {
+                const imgId = img.id;
+                const imgData = img.image_base64;
+                imagesData.push({
+                    id: imgId,
+                    data: imgData
+                });
+                pageImages[imgId] = `images/${imgId}.png`;
+            }
+            
+            // 替换Markdown中的图片引用
+            let pageMarkdown = page.markdown;
+            for (const [imgName, imgPath] of Object.entries(pageImages)) {
+                pageMarkdown = pageMarkdown.replace(
+                    new RegExp(`!\\[${imgName}\\]\\(${imgName}\\)`, 'g'), 
+                    `![${imgName}](${imgPath})`
+                );
+            }
+            
+            markdownContent += pageMarkdown + '\n\n';
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('处理OCR结果错误:', error);
+        throw new Error('处理OCR结果失败: ' + error.message);
+    }
+}
+
+// 翻译Markdown
+async function translateMarkdown(markdownText, targetLang, model, apiKey) {
+    try {
+        // 允许使用全局变量或传入参数
+        const content = markdownText || markdownContent;
+        const lang = targetLang || document.getElementById('targetLanguage').value;
+        const selectedModel = model || document.getElementById('translationModel').value;
+        const key = apiKey || document.getElementById('translationApiKey').value.trim();
+        
+        if (!content) {
+            throw new Error('没有要翻译的内容');
+        }
+
+        if (!key) {
+            throw new Error('未提供API密钥');
+        }
+        
+        if (selectedModel === 'none') {
+            return content; // 不需要翻译
+        }
+
+        // 修正targetLanguage值
+        const actualLang = lang === 'chinese' ? 'zh' : lang;
+
+        // 构建统一的翻译提示词
+        const translationPromptTemplate = `请将以下${actualLang === 'zh' ? '英文' : '中文'}内容翻译为${actualLang === 'zh' ? '中文' : '英文'}，
+        要求：
+
+1. 保持所有Markdown语法元素不变（如#标题, *斜体*, **粗体**, [链接](), ![图片]()等）
+
+2. 学术/专业术语应准确翻译，必要时可保留英文原文在括号中
+
+3. 保持原文的段落结构和格式
+
+4. 仅翻译内容，不要添加额外解释 
+
+5. 对于行间公式，使用$$...$$标记
+
+文档内容：
+
+${content}`;
+
+        //对温度等参数做统一默认设置, 若未单独设置, 则使用默认值
+        const temperature = 0.5;
+        const maxTokens = 100000;
+        const sys_prompt = "你是一个专业的文档翻译助手，擅长保持原文档格式进行精确翻译。";
+        
+        // 配置各种翻译API
+        const apiConfigs = {
+            'deepseek': {
+                endpoint: 'https://api.deepseek.com/v1/chat/completions',
+                modelName: 'DeepSeek v3 (deepseek-v3)',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${key}`
+                },
+                bodyBuilder: () => ({
+                    model: "deepseek-v3",
+                    messages: [
+                        { role: "system", content: sys_prompt },
+                        { role: "user", content: translationPromptTemplate }
+                    ],
+                    temperature: temperature,
+                    max_tokens: maxTokens
+                }),
+                responseExtractor: (data) => data.choices[0].message.content
+            },
+            'gemini': {
+                endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+                modelName: 'Google Gemini 2.0 Flash',
+                headers: { 'Content-Type': 'application/json' },
+                bodyBuilder: () => ({
+                    contents: [
+                        { 
+                            role: "user", 
+                            parts: [{ text: translationPromptTemplate }]
+                        }
+                    ],
+                    generationConfig: {
+                        temperature: temperature,
+                        maxOutputTokens: maxTokens
+                    }
+                }),
+                responseExtractor: (data) => data.candidates[0].content.parts[0].text
+            },
+            'claude': {
+                endpoint: 'https://api.anthropic.com/v1/messages',
+                modelName: 'Claude 3.5 Sonnet',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': key,
+                    'anthropic-version': '2023-06-01'
+                },
+                bodyBuilder: () => ({
+                    model: "claude-3-5-sonnet",
+                    max_tokens: maxTokens,
+                    messages: [
+                        { role: "user", content: translationPromptTemplate }
+                    ]
+                }),
+                responseExtractor: (data) => data.content[0].text
+            },
+            'mistral': {
+                endpoint: 'https://api.mistral.ai/v1/chat/completions',
+                modelName: 'Mistral Large (mistral-large-latest)',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${key}`
+                },
+                bodyBuilder: () => ({
+                    model: "mistral-large-latest",
+                    messages: [
+                        { role: "system", content: sys_prompt },
+                        { role: "user", content: translationPromptTemplate }
+                    ],
+                    temperature: temperature,
+                    max_tokens: maxTokens
+                }),
+                responseExtractor: (data) => data.choices[0].message.content
+            },
+            'tongyi-deepseek-v3': {
+                endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+                modelName: '阿里云通义百炼 DeepSeek v3',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${key}`
+                },
+                bodyBuilder: () => ({
+                    model: "deepseek-v3",
+                    messages: [
+                        { role: "system", content: sys_prompt },
+                        { role: "user", content: translationPromptTemplate }
+                    ],
+                    temperature: temperature,
+                    max_tokens: maxTokens
+                }),
+                responseExtractor: (data) => data.choices[0].message.content
+            },
+            'volcano-deepseek-v3': {
+                endpoint: 'https://api.volcengine.com/ml/api/v1/open/llm/inference',
+                modelName: '火山引擎 DeepSeek v3',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${key}`
+                },
+                bodyBuilder: () => ({
+                    model: "deepseek-v3",
+                    messages: [
+                        { role: "system", content: sys_prompt },
+                        { role: "user", content: translationPromptTemplate }
+                    ],
+                    parameters: {
+                        temperature: temperature,
+                        max_tokens: maxTokens
+                    }
+                }),
+                responseExtractor: (data) => data.choices[0].message.content
+            }
+        };
+
+        // 选择API配置
+        const apiConfig = apiConfigs[selectedModel];
+        
+        if (!apiConfig) {
+            throw new Error(`不支持的翻译模型: ${selectedModel}`);
+        }
+
+        addProgressLog(`正在调用${apiConfig.modelName || selectedModel}翻译API...`);
+
+        // 构建请求体
+        const requestBody = apiConfig.bodyBuilder();
+        
+        // 调用API
+        const response = await fetch(apiConfig.endpoint, {
+            method: 'POST',
+            headers: apiConfig.headers,
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            let errorText;
+            try {
+                errorText = await response.text();
+            } catch (e) {
+                errorText = `状态码: ${response.status}`;
+            }
+            throw new Error(`翻译API返回错误 (${response.status}): ${errorText}`);
+        }
+
+        const responseData = await response.json();
+        
+        try {
+            // 提取翻译结果
+            const translatedText = apiConfig.responseExtractor(responseData);
+            
+            if (!translatedText) {
+                throw new Error('译文为空');
+            }
+            
+            return translatedText;
+        } catch (error) {
+            console.error('提取翻译结果错误:', error, '原始响应:', responseData);
+            throw new Error(`提取翻译结果失败: ${error.message}`);
+        }
+    } catch (error) {
+        console.error('翻译错误:', error);
+        throw new Error(`调用${model}翻译API失败: ${error.message}`);
+    }
+}
+
+// 长文档翻译函数
+async function translateLongDocument(markdownContent, targetLang, model, apiKey) {
+    try {
+        // 1. 分割文档
+        const segments = splitMarkdownIntoSegments(markdownContent);
+        const totalSegments = segments.length;
+        
+        // 2. 逐段翻译
+        const translatedSegments = [];
+        let completedSegments = 0;
+        
+        for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i];
+            
+            // 添加分段信息到提示词
+            const segmentInfo = `[这是文档的第${i+1}部分，共${totalSegments}部分。请保持术语一致性，并确保翻译保持原格式。]`;
+            const segmentWithInfo = segmentInfo + "\n\n" + segment;
+            
+            showNotification(`正在翻译第${i+1}段，共${totalSegments}段 (${Math.round((i+1)/totalSegments*100)}%)`, 'info');
+            
+            // 翻译当前段落
+            const translatedSegment = await translateMarkdown(segmentWithInfo, targetLang, model, apiKey);
+            
+            // 去除回复中可能包含的段落信息标记
+            const cleanedTranslation = translatedSegment.replace(/\[这是文档的第.+部分，共.+部分。.*?\]\s*/g, '');
+            
+            translatedSegments.push(cleanedTranslation);
+            completedSegments++;
+        }
+        
+        // 3. 合并翻译结果
+        return mergeTranslatedSegments(translatedSegments);
+    } catch (error) {
+        console.error("长文档翻译错误:", error);
+        throw new Error(`长文档翻译失败: ${error.message}`);
+    }
+}
+
+// 智能分割Markdown为多个片段
+function splitMarkdownIntoSegments(markdown) {
+    // 估计每个标记的平均长度
+    const estimatedTokens = estimateTokenCount(markdown);
+    const tokenLimit = 12000; // 设置一个安全的token限制
+    
+    // 如果文档足够小，不需要分割
+    if (estimatedTokens <= tokenLimit) {
+        return [markdown];
+    }
+    
+    // 按章节分割
+    const segments = [];
+    const lines = markdown.split('\n');
+    let currentSegment = [];
+    let currentTokenCount = 0;
+    let inCodeBlock = false;
+    
+    // 定义标题行的正则表达式
+    const headingRegex = /^#{1,6}\s+.+$/;
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // 检测代码块
+        if (line.trim().startsWith('```')) {
+            inCodeBlock = !inCodeBlock;
+        }
+        
+        // 估计当前行的token数
+        const lineTokens = estimateTokenCount(line);
+        
+        // 判断是否应该在这里分割
+        const isHeading = headingRegex.test(line) && !inCodeBlock;
+        const wouldExceedLimit = currentTokenCount + lineTokens > tokenLimit;
+        
+        if (isHeading && currentSegment.length > 0 && (wouldExceedLimit || currentTokenCount > tokenLimit * 0.7)) {
+            // 在遇到标题且当前段已积累足够内容时分割
+            segments.push(currentSegment.join('\n'));
+            currentSegment = [];
+            currentTokenCount = 0;
+        }
+        
+        // 如果当前段落即使加上这一行也超过限制，而且已经有内容了
+        if (!isHeading && wouldExceedLimit && currentSegment.length > 0) {
+            segments.push(currentSegment.join('\n'));
+            currentSegment = [];
+            currentTokenCount = 0;
+        }
+        
+        // 添加当前行到当前段落
+        currentSegment.push(line);
+        currentTokenCount += lineTokens;
+    }
+    
+    // 添加最后一段
+    if (currentSegment.length > 0) {
+        segments.push(currentSegment.join('\n'));
+    }
+    
+    // 处理过大的段落（可能是因为没有标题或标记导致的）
+    const finalSegments = [];
+    for (const segment of segments) {
+        const segmentTokens = estimateTokenCount(segment);
+        if (segmentTokens > tokenLimit) {
+            // 如果段落仍然过大，按段落分割
+            const subSegments = splitByParagraphs(segment, tokenLimit);
+            finalSegments.push(...subSegments);
+        } else {
+            finalSegments.push(segment);
+        }
+    }
+    
+    return finalSegments;
+}
+
+// 按段落分割过大的文本块
+function splitByParagraphs(text, tokenLimit) {
+    const paragraphs = text.split('\n\n');
+    const segments = [];
+    let currentSegment = [];
+    let currentTokenCount = 0;
+    
+    for (const paragraph of paragraphs) {
+        const paragraphTokens = estimateTokenCount(paragraph);
+        
+        // 如果单个段落就超过了限制，则需要进一步分割
+        if (paragraphTokens > tokenLimit) {
+            // 如果当前段已有内容，先保存
+            if (currentSegment.length > 0) {
+                segments.push(currentSegment.join('\n\n'));
+                currentSegment = [];
+                currentTokenCount = 0;
+            }
+            
+            // 按句子分割大段落
+            const sentenceSegments = splitBySentences(paragraph, tokenLimit);
+            segments.push(...sentenceSegments);
+            continue;
+        }
+        
+        // 检查是否加上这个段落会超出限制
+        if (currentTokenCount + paragraphTokens > tokenLimit && currentSegment.length > 0) {
+            segments.push(currentSegment.join('\n\n'));
+            currentSegment = [];
+            currentTokenCount = 0;
+        }
+        
+        currentSegment.push(paragraph);
+        currentTokenCount += paragraphTokens;
+    }
+    
+    // 添加最后一段
+    if (currentSegment.length > 0) {
+        segments.push(currentSegment.join('\n\n'));
+    }
+    
+    return segments;
+}
+
+// 按句子分割过大的段落
+function splitBySentences(paragraph, tokenLimit) {
+    // 简单的句子分割规则（这里可以根据需要改进）
+    const sentences = paragraph.replace(/([.!?。！？])\s*/g, "$1\n").split('\n');
+    const segments = [];
+    let currentSegment = [];
+    let currentTokenCount = 0;
+    
+    for (const sentence of sentences) {
+        if (!sentence.trim()) continue;
+        
+        const sentenceTokens = estimateTokenCount(sentence);
+        
+        // 检查是否加上这个句子会超出限制
+        if (currentTokenCount + sentenceTokens > tokenLimit && currentSegment.length > 0) {
+            segments.push(currentSegment.join(' '));
+            currentSegment = [];
+            currentTokenCount = 0;
+        }
+        
+        currentSegment.push(sentence);
+        currentTokenCount += sentenceTokens;
+    }
+    
+    // 添加最后一段
+    if (currentSegment.length > 0) {
+        segments.push(currentSegment.join(' '));
+    }
+    
+    return segments;
+}
+
+// 合并翻译后的片段
+function mergeTranslatedSegments(segments) {
+    // 简单合并，可以根据需要添加更复杂的处理逻辑
+    return segments.join('\n\n');
+}
+
+// 估计文本的token数量（粗略估计）
+function estimateTokenCount(text) {
+    if (!text) return 0;
+    
+    // 中文和其他语言的处理方式不同
+    // 英文大约每75个字符对应20个token
+    // 中文大约每字符对应1.5个token
+    
+    // 检测是否包含大量中文
+    const chineseRatio = (text.match(/[\u4e00-\u9fa5]/g) || []).length / text.length;
+    
+    if (chineseRatio > 0.5) {
+        // 主要是中文文本
+        return Math.ceil(text.length * 1.5);
+    } else {
+        // 主要是英文或其他文本
+        return Math.ceil(text.length / 3.75);
+    }
+}
+
+// 将文件转换为Base64
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
+}
+
+// 下载单个文本文件
+function downloadText(content, filename) {
+    const blob = new Blob([content], { type: 'text/markdown' });
+    saveAs(blob, filename);
+}
+
+// 下载包含图像的Markdown
+async function downloadMarkdownWithImages() {
+    try {
+        const zip = new JSZip();
+        
+        // 添加Markdown文件
+        zip.file('document.md', markdownContent);
+        
+        // 创建images文件夹
+        const imagesFolder = zip.folder('images');
+        
+        // 添加图片
+        for (const img of imagesData) {
+            const imgData = img.data.split(',')[1];
+            imagesFolder.file(`${img.id}.png`, imgData, { base64: true });
+        }
+        
+        // 生成并下载zip文件
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const pdfName = pdfFile ? pdfFile.name.replace('.pdf', '') : 'document';
+        saveAs(zipBlob, `${pdfName}_markdown.zip`);
+    } catch (error) {
+        console.error('创建ZIP文件失败:', error);
+        showNotification('下载失败: ' + error.message, 'error');
+    }
+}
+
+downloadTranslationWithImages = async () => {
+    try {
+        const zip = new JSZip();
+        
+        // 添加Markdown文件
+        zip.file('document.md', translationContent);
+        
+        // 创建images文件夹
+        const imagesFolder = zip.folder('images');
+        
+        // 添加图片
+        for (const img of imagesData) {
+            const imgData = img.data.split(',')[1];
+            imagesFolder.file(`${img.id}.png`, imgData, { base64: true });
+        }
+        
+        // 生成并下载zip文件
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const pdfName = pdfFile ? pdfFile.name.replace('.pdf', '') : 'document';
+        saveAs(zipBlob, `${pdfName}_translation.zip`);
+    } catch (error) {
+        console.error('创建ZIP文件失败:', error);
+        showNotification('下载失败: ' + error.message, 'error');
+    }
+}

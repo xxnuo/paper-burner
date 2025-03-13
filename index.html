@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="PDF OCR与翻译工具 - 使用 Mistral OCR 提取 PDF 文本并转换为 Markdown，可选择使用 AI 模型进行翻译">
+    <title>Paper Burner - PDF文档 OCR与翻译工具</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/iconify-icon@2.0.0/dist/iconify-icon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/js-base64@3.7.5/base64.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .gradient-bg {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4edf9 100%);
+        }
+        .gradient-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f9fbff 100%);
+        }
+        .transition-all {
+            transition: all 0.3s ease;
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <header class="text-center mb-12">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-3">Paper Burner: PDF <span class="text-blue-600">OCR</span> 与翻译工具</h1>
+            <p class="text-gray-600 max-w-2xl mx-auto">使用 Mistral OCR 提取 PDF 文本并转换为 Markdown，可选择使用 AI 模型进行全文中文翻译</p>
+            <p class="text-gray-600 max-w-2xl mx-auto">完美保持公式、图标格式</p>
+            <p class="text-gray-600 max-w-2xl mx-auto">注意：AI 模型翻译结果仅供参考，最终内容请以原文为准</p>
+        </header>
+
+        <main>
+            <div class="bg-white rounded-xl shadow-sm p-6 mb-8">
+                <div class="mb-6">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                        <iconify-icon icon="carbon:api" class="mr-2 text-blue-500" width="24"></iconify-icon>
+                        API 密钥设置
+                    </h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="mistralApiKey" class="block text-sm font-medium text-gray-700 mb-1">Mistral API Key <span class="text-red-500">*</span></label>
+                            <div class="relative">
+                                <input type="password" id="mistralApiKey" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="输入您的 Mistral API Key">
+                                <button id="toggleMistralKey" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700">
+                                    <iconify-icon icon="carbon:view" width="20"></iconify-icon>
+                                </button>
+                            </div>
+                            <div class="mt-2 flex items-center">
+                                <input type="checkbox" id="rememberMistralKey" class="rounded text-blue-500 focus:ring-blue-500 mr-2">
+                                <label for="rememberMistralKey" class="text-sm text-gray-600">记住此 API Key</label>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="translationApiKey" class="block text-sm font-medium text-gray-700 mb-1">翻译 API Key (可选)</label>
+                            <div class="relative">
+                                <input type="password" id="translationApiKey" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="输入翻译服务 API Key (可选)">
+                                <button id="toggleTranslationKey" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700">
+                                    <iconify-icon icon="carbon:view" width="20"></iconify-icon>
+                                </button>
+                            </div>
+                            <div class="mt-2 flex items-center">
+                                <input type="checkbox" id="rememberTranslationKey" class="rounded text-blue-500 focus:ring-blue-500 mr-2">
+                                <label for="rememberTranslationKey" class="text-sm text-gray-600">记住此 API Key</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                        <iconify-icon icon="carbon:translate" class="mr-2 text-blue-500" width="24"></iconify-icon>
+                        翻译设置
+                    </h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="translationModel" class="block text-sm font-medium text-gray-700 mb-1">翻译模型</label>
+                            <select id="translationModel" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all">
+                                <option value="none">不需要翻译</option>
+                                <option value="mistral">Mistral Large</option>
+                                <option value="deepseek">DeepSeek v3</option>
+                                <option value="gemini">Gemini 2.0 Flash</option>
+                                <option value="claude">Claude 3.5 Sonnet</option>
+                                <option value="tongyi-deepseek-v3">通义百炼 DeepSeek v3</option>
+                                <option value="volcano-deepseek-v3">火山引擎 DeepSeek v3</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="targetLanguage" class="block text-sm font-medium text-gray-700 mb-1">目标语言</label>
+                            <select id="targetLanguage" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all">
+                                <option value="chinese">中文</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                        <iconify-icon icon="carbon:document-pdf" class="mr-2 text-blue-500" width="24"></iconify-icon>
+                        PDF 文件上传
+                    </h2>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center" id="dropZone">
+                        <input type="file" id="pdfFileInput" accept=".pdf" class="hidden">
+                        <div class="mx-auto mb-4 w-16 h-16 flex items-center justify-center rounded-full bg-blue-50">
+                            <iconify-icon icon="carbon:upload" class="text-blue-500" width="32"></iconify-icon>
+                        </div>
+                        <h3 class="text-lg font-medium text-gray-800 mb-1">拖放 PDF 文件到这里</h3>
+                        <p class="text-sm text-gray-500 mb-4">或者</p>
+                        <button id="browseFilesBtn" class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                            浏览文件
+                        </button>
+                        <div id="fileInfo" class="hidden mt-4 flex items-center justify-center text-left">
+                            <div class="mr-3">
+                                <iconify-icon icon="carbon:document-pdf" class="text-red-500" width="32"></iconify-icon>
+                            </div>
+                            <div>
+                                <p id="fileName" class="text-sm font-medium text-gray-800"></p>
+                                <p id="fileSize" class="text-xs text-gray-500"></p>
+                            </div>
+                            <button id="removeFileBtn" class="ml-4 text-gray-400 hover:text-gray-600">
+                                <iconify-icon icon="carbon:close" width="20"></iconify-icon>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+             
+
+                <div class="flex justify-center mt-8">
+                    <button id="processBtn" class="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+                        <iconify-icon icon="carbon:play" class="mr-2" width="20"></iconify-icon>
+                        <span>开始处理</span>
+                    </button>
+                </div>
+            </div>
+
+            <div id="resultsSection" class="bg-white rounded-xl shadow-sm p-6 mb-8 hidden">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                    <iconify-icon icon="carbon:document" class="mr-2 text-blue-500" width="24"></iconify-icon>
+                    处理结果
+                </h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="gradient-card rounded-lg p-4 border border-gray-100 shadow-sm">
+                        <h3 class="font-medium text-gray-800 mb-2 flex items-center">
+                            <iconify-icon icon="carbon:markdown" class="mr-2 text-blue-500" width="20"></iconify-icon>
+                            Markdown 内容
+                        </h3>
+                        <div id="markdownPreview" class="h-40 overflow-auto bg-gray-50 rounded p-3 text-sm text-gray-700 font-mono"></div>
+                        <button id="downloadMarkdownBtn" class="mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center w-full">
+                            <iconify-icon icon="carbon:download" class="mr-2" width="16"></iconify-icon>
+                            <span>下载 Markdown</span>
+                        </button>
+                    </div>
+                    
+                    <div class="gradient-card rounded-lg p-4 border border-gray-100 shadow-sm" id="translationResultCard">
+                        <h3 class="font-medium text-gray-800 mb-2 flex items-center">
+                            <iconify-icon icon="carbon:translate" class="mr-2 text-blue-500" width="20"></iconify-icon>
+                            翻译内容
+                        </h3>
+                        <div id="translationPreview" class="h-40 overflow-auto bg-gray-50 rounded p-3 text-sm text-gray-700"></div>
+                        <button id="downloadTranslationBtn" class="mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center w-full">
+                            <iconify-icon icon="carbon:download" class="mr-2" width="16"></iconify-icon>
+                            <span>下载翻译</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="progressSection" class="bg-white rounded-xl shadow-sm p-6 mb-8 hidden">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                    <iconify-icon icon="carbon:progress-bar" class="mr-2 text-blue-500" width="24"></iconify-icon>
+                    处理进度
+                </h2>
+                
+                <div class="mb-4">
+                    <div class="flex justify-between mb-1">
+                        <span id="progressStep" class="text-sm font-medium text-gray-700">OCR处理中...</span>
+                        <span id="progressPercentage" class="text-sm font-medium text-gray-700">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                </div>
+                
+                <div id="progressLog" class="bg-gray-50 rounded-lg p-4 h-32 overflow-auto text-sm text-gray-600 font-mono"></div>
+            </div>
+        </main>
+
+        <footer class="text-center text-gray-500 text-sm mt-12">
+<p class="mb-2">
+    <a href="https://github.com/baoyudu/ocrpdf" class="text-blue-500 hover:text-blue-700 transition-colors" target="_blank" rel="noopener noreferrer">
+        <iconify-icon icon="carbon:logo-github" class="mr-1" inline></iconify-icon>
+        GitHub
+    </a>
+</p>
+
+            <p>Bao Yu &copy; 2025</p>
+        </footer>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
