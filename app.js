@@ -14,6 +14,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const toggleTranslationKeyBtn = document.getElementById('toggleTranslationKey');
     const rememberTranslationKeyCheckbox = document.getElementById('rememberTranslationKey');
 
+    const translationModelSelect = document.getElementById('translationModel');
+    const customModelSettings = document.getElementById('customModelSettings');
+
     // 文件上传相关
     const dropZone = document.getElementById('dropZone');
     const pdfFileInput = document.getElementById('pdfFileInput');
@@ -24,7 +27,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const removeFileBtn = document.getElementById('removeFileBtn');
 
     // 翻译相关
-    const translationModel = document.getElementById('translationModel');
     const targetLanguage = document.getElementById('targetLanguage');
 
     // 按钮
@@ -173,9 +175,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 await processPdfWithMistral(mistralKey);
                 
                 // 如果选择了翻译，则执行翻译
-                if (translationModel.value !== 'none') {
+                if (translationModelSelect.value !== 'none') {
                     const translationKey = translationApiKeyInput.value.trim();
-                    if (translationModel.value !== 'none' && !translationKey) {
+                    if (translationModelSelect.value !== 'none' && !translationKey) {
                         showNotification('请输入翻译API Key', 'error');
                         updateProgress('翻译需要API Key', 100);
                         addProgressLog('错误: 缺少翻译API Key');
@@ -183,7 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
                     updateProgress('开始翻译...', 60);
-                    addProgressLog(`使用${translationModel.value}模型进行翻译...`);
+                    addProgressLog(`使用${translationModelSelect.value}模型进行翻译...`);
                     
                     // 获取文档大小估计
                     const estimatedTokens = estimateTokenCount(markdownContent);
@@ -192,10 +194,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (estimatedTokens > tokenLimit) {
                         // 使用分段翻译
                         showNotification(`文档较大(~${Math.round(estimatedTokens/1000)}K tokens)，将进行分段翻译`, 'info');
-                        translationContent = await translateLongDocument(markdownContent, targetLanguage.value, translationModel.value, translationKey);
+                        translationContent = await translateLongDocument(markdownContent, targetLanguage.value, translationModelSelect.value, translationKey);
                     } else {
                         // 直接翻译
-                        translationContent = await translateMarkdown(markdownContent, targetLanguage.value, translationModel.value, translationKey);
+                        translationContent = await translateMarkdown(markdownContent, targetLanguage.value, translationModelSelect.value, translationKey);
                     }
                 }
 
@@ -235,7 +237,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // 翻译模型变更
-    translationModel.addEventListener('change', () => {
+    translationModelSelect.addEventListener('change', function() {
+        if (this.value === 'custom') {
+            customModelSettings.classList.remove('hidden');
+        } else {
+            customModelSettings.classList.add('hidden');
+        }
+        
+        // 更新翻译界面可见性
         updateTranslationUIVisibility();
     });
 
@@ -260,15 +269,14 @@ function updateProcessButtonState() {
 }
 
 function updateTranslationUIVisibility() {
-    const translationModel = document.getElementById('translationModel').value;
-    const translationApiKeySection = document.getElementById('translationApiKey').parentElement;
-    
-    if (translationModel === 'none') {
-        translationApiKeySection.classList.add('opacity-50');
-        document.getElementById('translationApiKey').disabled = true;
+    const translationModelValue = translationModelSelect.value;
+
+    // 如果选择了翻译模型，显示API Key输入框和提示
+    const translationApiKeySection = document.querySelector('#translationApiKey').closest('div').parentNode;
+    if (translationModelValue !== 'none') {
+        translationApiKeySection.style.display = 'block';
     } else {
-        translationApiKeySection.classList.remove('opacity-50');
-        document.getElementById('translationApiKey').disabled = false;
+        translationApiKeySection.style.display = 'none';
     }
 }
 
@@ -746,6 +754,84 @@ ${content}`;
                     }
                 }),
                 responseExtractor: (data) => data.choices[0].message.content
+            },
+            'custom': {
+                // 自定义模型配置将动态生成
+                createConfig: () => {
+                    // 获取用户设置的参数
+                    const customModelName = document.getElementById('customModelName').value.trim();
+                    const customApiEndpoint = document.getElementById('customApiEndpoint').value.trim();
+                    const customModelId = document.getElementById('customModelId').value.trim();
+                    const customRequestFormat = document.getElementById('customRequestFormat').value;
+                    
+                    if (!customModelName || !customApiEndpoint || !customModelId) {
+                        throw new Error('请填写完整的自定义模型信息');
+                    }
+                    
+                    // 根据选择的请求格式创建不同的配置
+                    const config = {
+                        endpoint: customApiEndpoint,
+                        modelName: customModelName,
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        bodyBuilder: null,
+                        responseExtractor: null
+                    };
+                    
+                    // 添加授权头
+                    if (customApiEndpoint.includes('anthropic')) {
+                        config.headers['x-api-key'] = key;
+                        config.headers['anthropic-version'] = '2023-06-01';
+                    } else {
+                        config.headers['Authorization'] = `Bearer ${key}`;
+                    }
+                    
+                    // 根据格式设置请求体构建器和响应提取器
+                    switch (customRequestFormat) {
+                        case 'openai':
+                            config.bodyBuilder = () => ({
+                                model: customModelId,
+                                messages: [
+                                    { role: "system", content: sys_prompt },
+                                    { role: "user", content: translationPromptTemplate }
+                                ],
+                                temperature: temperature,
+                                max_tokens: maxTokens
+                            });
+                            config.responseExtractor = (data) => data.choices[0].message.content;
+                            break;
+                            
+                        case 'anthropic':
+                            config.bodyBuilder = () => ({
+                                model: customModelId,
+                                max_tokens: maxTokens,
+                                messages: [
+                                    { role: "user", content: translationPromptTemplate }
+                                ]
+                            });
+                            config.responseExtractor = (data) => data.content[0].text;
+                            break;
+                            
+                        case 'gemini':
+                            config.bodyBuilder = () => ({
+                                contents: [
+                                    { 
+                                        role: "user", 
+                                        parts: [{ text: translationPromptTemplate }]
+                                    }
+                                ],
+                                generationConfig: {
+                                    temperature: temperature,
+                                    maxOutputTokens: maxTokens
+                                }
+                            });
+                            config.responseExtractor = (data) => data.candidates[0].content.parts[0].text;
+                            break;
+                    }
+                    
+                    return config;
+                }
             }
         };
 
@@ -757,40 +843,60 @@ ${content}`;
         }
 
         addProgressLog(`正在调用${apiConfig.modelName || selectedModel}翻译API...`);
-
-        // 构建请求体
-        const requestBody = apiConfig.bodyBuilder();
-        
-        // 调用API
-        const response = await fetch(apiConfig.endpoint, {
-            method: 'POST',
-            headers: apiConfig.headers,
-            body: JSON.stringify(requestBody)
-        });
+        let response;
+        // 使用常规模型配置
+        if (selectedModel !== 'custom') {
+            response = await fetch(apiConfig.endpoint, {
+                method: 'POST',
+                headers: apiConfig.headers,
+                body: JSON.stringify(apiConfig.bodyBuilder())
+            });
+        } else {
+            // 使用自定义模型配置
+            const customConfig = apiConfig.createConfig();
+            response = await fetch(customConfig.endpoint, {
+                method: 'POST',
+                headers: customConfig.headers,
+                body: JSON.stringify(customConfig.bodyBuilder())
+            });
+        }
 
         if (!response.ok) {
             let errorText;
             try {
-                errorText = await response.text();
+                const errorJson = await response.json();
+                errorText = JSON.stringify(errorJson);
             } catch (e) {
-                errorText = `状态码: ${response.status}`;
+                errorText = await response.text();
             }
-            throw new Error(`翻译API返回错误 (${response.status}): ${errorText}`);
+            
+            console.error(`API错误 (${response.status}): ${errorText}`);
+            throw new Error(`翻译API返回错误 (${response.status}): ${errorText.substring(0, 200)}`);
         }
 
-        const responseData = await response.json();
+        const data = await response.json();
+        
+        // 提取翻译后的内容
+        let translatedContent;
+        
+        if (selectedModel !== 'custom') {
+            // 使用预定义模型的响应提取器
+            translatedContent = apiConfig.responseExtractor(data);
+        } else {
+            // 使用自定义模型的响应提取器
+            const customConfig = apiConfig.createConfig();
+            translatedContent = customConfig.responseExtractor(data);
+        }
         
         try {
             // 提取翻译结果
-            const translatedText = apiConfig.responseExtractor(responseData);
-            
-            if (!translatedText) {
+            if (!translatedContent) {
                 throw new Error('译文为空');
             }
             
-            return translatedText;
+            return translatedContent;
         } catch (error) {
-            console.error('提取翻译结果错误:', error, '原始响应:', responseData);
+            console.error('提取翻译结果错误:', error, '原始响应:', data);
             throw new Error(`提取翻译结果失败: ${error.message}`);
         }
     } catch (error) {
@@ -800,48 +906,47 @@ ${content}`;
 }
 
 // 长文档翻译函数
-async function translateLongDocument(markdownContent, targetLang, model, apiKey) {
-    try {
-        // 1. 分割文档
-        const segments = splitMarkdownIntoSegments(markdownContent);
-        const totalSegments = segments.length;
+async function translateLongDocument(markdownText, targetLang, model, apiKey) {
+    const parts = splitMarkdownIntoChunks(markdownText);
+    console.log(`将文档分割为${parts.length}个部分进行翻译`);
+    addProgressLog(`文档被分割为${parts.length}个部分进行翻译`);
+    
+    let translatedContent = '';
+    for (let i = 0; i < parts.length; i++) {
+        updateProgress(`翻译第 ${i+1}/${parts.length} 部分...`, 60 + Math.floor((i / parts.length) * 30));
+        addProgressLog(`正在翻译第 ${i+1}/${parts.length} 部分...`);
         
-        // 2. 逐段翻译
-        const translatedSegments = [];
-        let completedSegments = 0;
-        
-        for (let i = 0; i < segments.length; i++) {
-            const segment = segments[i];
+        try {
+            // 翻译当前部分
+            const partResult = await translateMarkdown(parts[i], targetLang, model, apiKey);
+            translatedContent += partResult;
             
-            // 添加分段信息到提示词
-            const segmentInfo = `[这是文档的第${i+1}部分，共${totalSegments}部分。请保持术语一致性，并确保翻译保持原格式。]`;
-            const segmentWithInfo = segmentInfo + "\n\n" + segment;
+            // 添加分隔符（如果不是最后一部分）
+            if (i < parts.length - 1) {
+                translatedContent += '\n\n';
+            }
             
-            showNotification(`正在翻译第${i+1}段，共${totalSegments}段 (${Math.round((i+1)/totalSegments*100)}%)`, 'info');
+            // 简单的节流，避免API速率限制
+            if (i < parts.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        } catch (error) {
+            console.error(`第 ${i+1} 部分翻译失败:`, error);
+            addProgressLog(`第 ${i+1} 部分翻译失败: ${error.message}`);
             
-            // 翻译当前段落
-            const translatedSegment = await translateMarkdown(segmentWithInfo, targetLang, model, apiKey);
-            
-            // 去除回复中可能包含的段落信息标记
-            const cleanedTranslation = translatedSegment.replace(/\[这是文档的第.+部分，共.+部分。.*?\]\s*/g, '');
-            
-            translatedSegments.push(cleanedTranslation);
-            completedSegments++;
+            // 继续尝试其余部分
+            translatedContent += `\n\n> **翻译错误 (第 ${i+1} 部分)**: ${error.message}\n\n${parts[i]}\n\n`;
         }
-        
-        // 3. 合并翻译结果
-        return mergeTranslatedSegments(translatedSegments);
-    } catch (error) {
-        console.error("长文档翻译错误:", error);
-        throw new Error(`长文档翻译失败: ${error.message}`);
     }
+    
+    return translatedContent;
 }
 
 // 智能分割Markdown为多个片段
-function splitMarkdownIntoSegments(markdown) {
+function splitMarkdownIntoChunks(markdown) {
     // 估计每个标记的平均长度
     const estimatedTokens = estimateTokenCount(markdown);
-    const tokenLimit = 12000; // 设置一个安全的token限制
+    const tokenLimit = 2000; // 设置一个安全的token限制
     
     // 如果文档足够小，不需要分割
     if (estimatedTokens <= tokenLimit) {
@@ -849,9 +954,9 @@ function splitMarkdownIntoSegments(markdown) {
     }
     
     // 按章节分割
-    const segments = [];
+    const chunks = [];
     const lines = markdown.split('\n');
-    let currentSegment = [];
+    let currentChunk = [];
     let currentTokenCount = 0;
     let inCodeBlock = false;
     
@@ -873,51 +978,51 @@ function splitMarkdownIntoSegments(markdown) {
         const isHeading = headingRegex.test(line) && !inCodeBlock;
         const wouldExceedLimit = currentTokenCount + lineTokens > tokenLimit;
         
-        if (isHeading && currentSegment.length > 0 && (wouldExceedLimit || currentTokenCount > tokenLimit * 0.7)) {
+        if (isHeading && currentChunk.length > 0 && (wouldExceedLimit || currentTokenCount > tokenLimit * 0.7)) {
             // 在遇到标题且当前段已积累足够内容时分割
-            segments.push(currentSegment.join('\n'));
-            currentSegment = [];
+            chunks.push(currentChunk.join('\n'));
+            currentChunk = [];
             currentTokenCount = 0;
         }
         
         // 如果当前段落即使加上这一行也超过限制，而且已经有内容了
-        if (!isHeading && wouldExceedLimit && currentSegment.length > 0) {
-            segments.push(currentSegment.join('\n'));
-            currentSegment = [];
+        if (!isHeading && wouldExceedLimit && currentChunk.length > 0) {
+            chunks.push(currentChunk.join('\n'));
+            currentChunk = [];
             currentTokenCount = 0;
         }
         
         // 添加当前行到当前段落
-        currentSegment.push(line);
+        currentChunk.push(line);
         currentTokenCount += lineTokens;
     }
     
     // 添加最后一段
-    if (currentSegment.length > 0) {
-        segments.push(currentSegment.join('\n'));
+    if (currentChunk.length > 0) {
+        chunks.push(currentChunk.join('\n'));
     }
     
     // 处理过大的段落（可能是因为没有标题或标记导致的）
-    const finalSegments = [];
-    for (const segment of segments) {
-        const segmentTokens = estimateTokenCount(segment);
-        if (segmentTokens > tokenLimit) {
+    const finalChunks = [];
+    for (const chunk of chunks) {
+        const chunkTokens = estimateTokenCount(chunk);
+        if (chunkTokens > tokenLimit) {
             // 如果段落仍然过大，按段落分割
-            const subSegments = splitByParagraphs(segment, tokenLimit);
-            finalSegments.push(...subSegments);
+            const subChunks = splitByParagraphs(chunk, tokenLimit);
+            finalChunks.push(...subChunks);
         } else {
-            finalSegments.push(segment);
+            finalChunks.push(chunk);
         }
     }
     
-    return finalSegments;
+    return finalChunks;
 }
 
 // 按段落分割过大的文本块
 function splitByParagraphs(text, tokenLimit) {
     const paragraphs = text.split('\n\n');
-    const segments = [];
-    let currentSegment = [];
+    const chunks = [];
+    let currentChunk = [];
     let currentTokenCount = 0;
     
     for (const paragraph of paragraphs) {
@@ -926,43 +1031,43 @@ function splitByParagraphs(text, tokenLimit) {
         // 如果单个段落就超过了限制，则需要进一步分割
         if (paragraphTokens > tokenLimit) {
             // 如果当前段已有内容，先保存
-            if (currentSegment.length > 0) {
-                segments.push(currentSegment.join('\n\n'));
-                currentSegment = [];
+            if (currentChunk.length > 0) {
+                chunks.push(currentChunk.join('\n\n'));
+                currentChunk = [];
                 currentTokenCount = 0;
             }
             
             // 按句子分割大段落
-            const sentenceSegments = splitBySentences(paragraph, tokenLimit);
-            segments.push(...sentenceSegments);
+            const sentenceChunks = splitBySentences(paragraph, tokenLimit);
+            chunks.push(...sentenceChunks);
             continue;
         }
         
         // 检查是否加上这个段落会超出限制
-        if (currentTokenCount + paragraphTokens > tokenLimit && currentSegment.length > 0) {
-            segments.push(currentSegment.join('\n\n'));
-            currentSegment = [];
+        if (currentTokenCount + paragraphTokens > tokenLimit && currentChunk.length > 0) {
+            chunks.push(currentChunk.join('\n\n'));
+            currentChunk = [];
             currentTokenCount = 0;
         }
         
-        currentSegment.push(paragraph);
+        currentChunk.push(paragraph);
         currentTokenCount += paragraphTokens;
     }
     
     // 添加最后一段
-    if (currentSegment.length > 0) {
-        segments.push(currentSegment.join('\n\n'));
+    if (currentChunk.length > 0) {
+        chunks.push(currentChunk.join('\n\n'));
     }
     
-    return segments;
+    return chunks;
 }
 
 // 按句子分割过大的段落
 function splitBySentences(paragraph, tokenLimit) {
     // 简单的句子分割规则（这里可以根据需要改进）
     const sentences = paragraph.replace(/([.!?。！？])\s*/g, "$1\n").split('\n');
-    const segments = [];
-    let currentSegment = [];
+    const chunks = [];
+    let currentChunk = [];
     let currentTokenCount = 0;
     
     for (const sentence of sentences) {
@@ -971,28 +1076,28 @@ function splitBySentences(paragraph, tokenLimit) {
         const sentenceTokens = estimateTokenCount(sentence);
         
         // 检查是否加上这个句子会超出限制
-        if (currentTokenCount + sentenceTokens > tokenLimit && currentSegment.length > 0) {
-            segments.push(currentSegment.join(' '));
-            currentSegment = [];
+        if (currentTokenCount + sentenceTokens > tokenLimit && currentChunk.length > 0) {
+            chunks.push(currentChunk.join(' '));
+            currentChunk = [];
             currentTokenCount = 0;
         }
         
-        currentSegment.push(sentence);
+        currentChunk.push(sentence);
         currentTokenCount += sentenceTokens;
     }
     
     // 添加最后一段
-    if (currentSegment.length > 0) {
-        segments.push(currentSegment.join(' '));
+    if (currentChunk.length > 0) {
+        chunks.push(currentChunk.join(' '));
     }
     
-    return segments;
+    return chunks;
 }
 
 // 合并翻译后的片段
-function mergeTranslatedSegments(segments) {
+function mergeTranslatedChunks(chunks) {
     // 简单合并，可以根据需要添加更复杂的处理逻辑
-    return segments.join('\n\n');
+    return chunks.join('\n\n');
 }
 
 // 估计文本的token数量（粗略估计）
