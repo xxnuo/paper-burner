@@ -126,6 +126,28 @@
                     </div>
                 </div>
 
+                <div class="mt-4">
+                    <button id="advancedSettingsToggle" class="text-sm text-gray-500 hover:text-gray-700 flex items-center" type="button">
+                        <iconify-icon icon="carbon:settings-adjust" class="mr-1" width="16"></iconify-icon>
+                        <span>高级设置</span>
+                        <iconify-icon icon="carbon:chevron-down" class="ml-1" width="16" id="advancedSettingsIcon"></iconify-icon>
+                    </button>
+                    
+                    <div id="advancedSettings" class="hidden mt-3 pt-3 border-t border-gray-100">
+                        <div class="grid grid-cols-1 gap-4">
+                            <div>
+                                <label for="maxTokensPerChunk" class="block text-sm font-medium text-gray-700 mb-1">每段最大Token数</label>
+                                <div class="flex items-center">
+                                    <input type="range" id="maxTokensPerChunk" min="500" max="10000" step="100" value="2000" 
+                                        class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                    <span id="maxTokensPerChunkValue" class="ml-2 text-sm text-gray-600 min-w-[50px]">2000</span>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1">默认为2000，较小的值会导致更多的分段，较大的值可能超出模型上下文限制或导致超时</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="mb-6">
                     <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                         <iconify-icon icon="carbon:document-pdf" class="mr-2 text-blue-500" width="24"></iconify-icon>

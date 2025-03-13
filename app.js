@@ -17,6 +17,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const translationModelSelect = document.getElementById('translationModel');
     const customModelSettings = document.getElementById('customModelSettings');
 
+    // 高级设置相关
+    const advancedSettingsToggle = document.getElementById('advancedSettingsToggle');
+    const advancedSettings = document.getElementById('advancedSettings');
+    const advancedSettingsIcon = document.getElementById('advancedSettingsIcon');
+    const maxTokensPerChunk = document.getElementById('maxTokensPerChunk');
+    const maxTokensPerChunkValue = document.getElementById('maxTokensPerChunkValue');
+
     // 文件上传相关
     const dropZone = document.getElementById('dropZone');
     const pdfFileInput = document.getElementById('pdfFileInput');
@@ -57,6 +64,9 @@ document.addEventListener('DOMContentLoaded', () => {
         translationApiKeyInput.value = localStorage.getItem('translationApiKey');
         rememberTranslationKeyCheckbox.checked = true;
     }
+
+    // 加载设置
+    loadSettings();
 
     // API Key 显示/隐藏切换
     toggleMistralKeyBtn.addEventListener('click', () => {
@@ -246,6 +256,30 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 更新翻译界面可见性
         updateTranslationUIVisibility();
+        
+        // 保存设置
+        saveSettings();
+    });
+    
+    // 高级设置开关
+    advancedSettingsToggle.addEventListener('click', function() {
+        advancedSettings.classList.toggle('hidden');
+        
+        // 更新图标方向
+        if (advancedSettings.classList.contains('hidden')) {
+            advancedSettingsIcon.setAttribute('icon', 'carbon:chevron-down');
+        } else {
+            advancedSettingsIcon.setAttribute('icon', 'carbon:chevron-up');
+        }
+        
+        // 保存设置
+        saveSettings();
+    });
+    
+    // 最大Token数设置滑动条
+    maxTokensPerChunk.addEventListener('input', function() {
+        maxTokensPerChunkValue.textContent = this.value;
+        saveSettings();
     });
 
     // 初始化 UI 状态
@@ -935,7 +969,7 @@ async function translateLongDocument(markdownText, targetLang, model, apiKey) {
             addProgressLog(`第 ${i+1} 部分翻译失败: ${error.message}`);
             
             // 继续尝试其余部分
-            translatedContent += `\n\n> **翻译错误 (第 ${i+1} 部分)**: ${error.message}\n\n${parts[i]}\n\n`;
+            translatedContent += `\n\n> **翻译错误 (第 ${i+1} 部分), 使用原语言**: ${error.message}\n\n${parts[i]}\n\n`;
         }
     }
     
@@ -946,7 +980,8 @@ async function translateLongDocument(markdownText, targetLang, model, apiKey) {
 function splitMarkdownIntoChunks(markdown) {
     // 估计每个标记的平均长度
     const estimatedTokens = estimateTokenCount(markdown);
-    const tokenLimit = 2000; // 设置一个安全的token限制
+    // 从用户设置获取最大token数限制
+    const tokenLimit = parseInt(maxTokensPerChunk.value) || 2000;
     
     // 如果文档足够小，不需要分割
     if (estimatedTokens <= tokenLimit) {
@@ -1186,5 +1221,71 @@ downloadTranslationWithImages = async () => {
     } catch (error) {
         console.error('创建ZIP文件失败:', error);
         showNotification('下载失败: ' + error.message, 'error');
+    }
+}
+
+// 保存设置
+function saveSettings() {
+    // 保存高级设置到本地存储
+    localStorage.setItem('advancedSettings', JSON.stringify({
+        maxTokensPerChunk: maxTokensPerChunk.value
+    }));
+    
+    // 如果是自定义模型，保存自定义模型设置
+    if (translationModelSelect.value === 'custom') {
+        localStorage.setItem('customModelSettings', JSON.stringify({
+            modelName: document.getElementById('customModelName').value,
+            apiEndpoint: document.getElementById('customApiEndpoint').value,
+            modelId: document.getElementById('customModelId').value,
+            requestFormat: document.getElementById('customRequestFormat').value
+        }));
+    }
+    
+    // 保存选中的翻译模型
+    localStorage.setItem('selectedTranslationModel', translationModelSelect.value);
+}
+
+// 加载设置
+function loadSettings() {
+    // 加载高级设置
+    try {
+        const advancedSettingsData = localStorage.getItem('advancedSettings');
+        if (advancedSettingsData) {
+            const settings = JSON.parse(advancedSettingsData);
+            if (settings.maxTokensPerChunk) {
+                maxTokensPerChunk.value = settings.maxTokensPerChunk;
+                maxTokensPerChunkValue.textContent = settings.maxTokensPerChunk;
+            }
+        }
+    } catch (e) {
+        console.error('加载高级设置失败:', e);
+    }
+    
+    // 加载自定义模型设置
+    try {
+        const customModelData = localStorage.getItem('customModelSettings');
+        if (customModelData) {
+            const settings = JSON.parse(customModelData);
+            document.getElementById('customModelName').value = settings.modelName || '';
+            document.getElementById('customApiEndpoint').value = settings.apiEndpoint || '';
+            document.getElementById('customModelId').value = settings.modelId || '';
+            document.getElementById('customRequestFormat').value = settings.requestFormat || 'openai';
+        }
+    } catch (e) {
+        console.error('加载自定义模型设置失败:', e);
+    }
+    
+    // 加载选中的翻译模型
+    try {
+        const selectedModel = localStorage.getItem('selectedTranslationModel');
+        if (selectedModel) {
+            translationModelSelect.value = selectedModel;
+            // 如果是自定义模型，显示自定义设置
+            if (selectedModel === 'custom') {
+                customModelSettings.classList.remove('hidden');
+            }
+        }
+    } catch (e) {
+        console.error('加载选中的翻译模型失败:', e);
     }
 }
