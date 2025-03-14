@@ -5,55 +5,54 @@ let translationContent = '';
 let imagesData = [];
 
 // DOM 元素
+const mistralApiKeyInput = document.getElementById('mistralApiKey');
+const toggleMistralKeyBtn = document.getElementById('toggleMistralKey');
+const rememberMistralKeyCheckbox = document.getElementById('rememberMistralKey');
+const translationApiKeyInput = document.getElementById('translationApiKey');
+const toggleTranslationKeyBtn = document.getElementById('toggleTranslationKey');
+const rememberTranslationKeyCheckbox = document.getElementById('rememberTranslationKey');
+
+const translationModelSelect = document.getElementById('translationModel');
+const customModelSettings = document.getElementById('customModelSettings');
+
+// 高级设置相关
+const advancedSettingsToggle = document.getElementById('advancedSettingsToggle');
+const advancedSettings = document.getElementById('advancedSettings');
+const advancedSettingsIcon = document.getElementById('advancedSettingsIcon');
+const maxTokensPerChunk = document.getElementById('maxTokensPerChunk');
+const maxTokensPerChunkValue = document.getElementById('maxTokensPerChunkValue');
+
+// 文件上传相关
+const dropZone = document.getElementById('dropZone');
+const pdfFileInput = document.getElementById('pdfFileInput');
+const browseFilesBtn = document.getElementById('browseFilesBtn');
+const fileInfo = document.getElementById('fileInfo');
+const fileName = document.getElementById('fileName');
+const fileSize = document.getElementById('fileSize');
+const removeFileBtn = document.getElementById('removeFileBtn');
+
+// 翻译相关
+const targetLanguage = document.getElementById('targetLanguage');
+
+// 按钮
+const processBtn = document.getElementById('processBtn');
+const downloadMarkdownBtn = document.getElementById('downloadMarkdownBtn');
+const downloadTranslationBtn = document.getElementById('downloadTranslationBtn');
+
+// 结果展示
+const resultsSection = document.getElementById('resultsSection');
+const markdownPreview = document.getElementById('markdownPreview');
+const translationPreview = document.getElementById('translationPreview');
+const translationResultCard = document.getElementById('translationResultCard');
+
+// 进度相关
+const progressSection = document.getElementById('progressSection');
+const progressStep = document.getElementById('progressStep');
+const progressPercentage = document.getElementById('progressPercentage');
+const progressBar = document.getElementById('progressBar');
+const progressLog = document.getElementById('progressLog');
+
 document.addEventListener('DOMContentLoaded', () => {
-    // API Key 相关
-    const mistralApiKeyInput = document.getElementById('mistralApiKey');
-    const toggleMistralKeyBtn = document.getElementById('toggleMistralKey');
-    const rememberMistralKeyCheckbox = document.getElementById('rememberMistralKey');
-    const translationApiKeyInput = document.getElementById('translationApiKey');
-    const toggleTranslationKeyBtn = document.getElementById('toggleTranslationKey');
-    const rememberTranslationKeyCheckbox = document.getElementById('rememberTranslationKey');
-
-    const translationModelSelect = document.getElementById('translationModel');
-    const customModelSettings = document.getElementById('customModelSettings');
-
-    // 高级设置相关
-    const advancedSettingsToggle = document.getElementById('advancedSettingsToggle');
-    const advancedSettings = document.getElementById('advancedSettings');
-    const advancedSettingsIcon = document.getElementById('advancedSettingsIcon');
-    const maxTokensPerChunk = document.getElementById('maxTokensPerChunk');
-    const maxTokensPerChunkValue = document.getElementById('maxTokensPerChunkValue');
-
-    // 文件上传相关
-    const dropZone = document.getElementById('dropZone');
-    const pdfFileInput = document.getElementById('pdfFileInput');
-    const browseFilesBtn = document.getElementById('browseFilesBtn');
-    const fileInfo = document.getElementById('fileInfo');
-    const fileName = document.getElementById('fileName');
-    const fileSize = document.getElementById('fileSize');
-    const removeFileBtn = document.getElementById('removeFileBtn');
-
-    // 翻译相关
-    const targetLanguage = document.getElementById('targetLanguage');
-
-    // 按钮
-    const processBtn = document.getElementById('processBtn');
-    const downloadMarkdownBtn = document.getElementById('downloadMarkdownBtn');
-    const downloadTranslationBtn = document.getElementById('downloadTranslationBtn');
-
-    // 结果展示
-    const resultsSection = document.getElementById('resultsSection');
-    const markdownPreview = document.getElementById('markdownPreview');
-    const translationPreview = document.getElementById('translationPreview');
-    const translationResultCard = document.getElementById('translationResultCard');
-
-    // 进度相关
-    const progressSection = document.getElementById('progressSection');
-    const progressStep = document.getElementById('progressStep');
-    const progressPercentage = document.getElementById('progressPercentage');
-    const progressBar = document.getElementById('progressBar');
-    const progressLog = document.getElementById('progressLog');
-
     // 初始化 - 从本地存储加载 API Key
     if (localStorage.getItem('mistralApiKey')) {
         mistralApiKeyInput.value = localStorage.getItem('mistralApiKey');
@@ -281,6 +280,24 @@ document.addEventListener('DOMContentLoaded', () => {
     maxTokensPerChunk.addEventListener('input', function() {
         maxTokensPerChunkValue.textContent = this.value;
         saveSettings();
+    });
+
+    // 为自定义模型设置添加变更事件监听器
+    const customModelInputs = [
+        document.getElementById('customModelName'),
+        document.getElementById('customApiEndpoint'),
+        document.getElementById('customModelId'),
+        document.getElementById('customRequestFormat')
+    ];
+    
+    customModelInputs.forEach(input => {
+        input.addEventListener('change', function() {
+            saveSettings();
+        });
+        // 同时监听输入事件，实时保存
+        input.addEventListener('input', function() {
+            saveSettings();
+        });
     });
 
     // 初始化 UI 状态
