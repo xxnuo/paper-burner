@@ -1051,10 +1051,6 @@ async function translateLongDocument(markdownText, targetLang, model, apiKey) {
     
     let translatedContent = '';
     
-    // 添加文档头部声明
-    const currentDate = new Date().toISOString().split('T')[0];
-    translatedContent += `> *本文档由 Paper Burner 工具制作 (${currentDate})。内容由 AI 大模型翻译生成，不保证翻译内容的准确性和完整性。*\n\n`;
-    
     for (let i = 0; i < parts.length; i++) {
         updateProgress(`翻译第 ${i+1}/${parts.length} 部分...`, 60 + Math.floor((i / parts.length) * 30));
         addProgressLog(`正在翻译第 ${i+1}/${parts.length} 部分...`);
@@ -1082,8 +1078,6 @@ async function translateLongDocument(markdownText, targetLang, model, apiKey) {
         }
     }
     
-    // 添加文档底部声明
-    translatedContent += `\n\n---\n> *免责声明：本文档内容由大模型API自动翻译生成，Paper Burner 工具不对翻译内容的准确性、完整性和合法性负责。*`;
     
     return translatedContent;
 }
@@ -1314,8 +1308,14 @@ downloadTranslationWithImages = async () => {
     try {
         const zip = new JSZip();
         
-        // 添加Markdown文件
-        zip.file('document.md', translationContent);
+        // 直接添加声明到翻译内容
+        const currentDate = new Date().toISOString().split('T')[0];
+        const headerDeclaration = `> *本文档由 Paper Burner 工具制作 (${currentDate})。内容由 AI 大模型翻译生成，不保证翻译内容的准确性和完整性。*\n\n`;
+        const footerDeclaration = `\n\n---\n> *免责声明：本文档内容由大模型API自动翻译生成，Paper Burner 工具不对翻译内容的准确性、完整性和合法性负责。*`;
+        
+        // 添加Markdown文件，包含声明
+        const contentToDownload = headerDeclaration + translationContent + footerDeclaration;
+        zip.file('document.md', contentToDownload);
         
         // 创建images文件夹
         const imagesFolder = zip.folder('images');
