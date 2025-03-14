@@ -203,10 +203,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     if (estimatedTokens > tokenLimit) {
                         // 使用分段翻译
-                        showNotification(`文档较大(~${Math.round(estimatedTokens/1000)}K tokens)，将进行分段翻译`, 'info');
+                        addProgressLog(`文档较大(~${Math.round(estimatedTokens/1000)}K tokens)，将进行分段翻译`);
                         translationContent = await translateLongDocument(markdownContent, targetLanguage.value, translationModelSelect.value, translationKey);
                     } else {
                         // 直接翻译
+                        addProgressLog(`文档较小(~${Math.round(estimatedTokens/1000)}K tokens)，不分段直接翻译`);
                         translationContent = await translateMarkdown(markdownContent, targetLanguage.value, translationModelSelect.value, translationKey);
                     }
                 }
@@ -361,8 +362,90 @@ function addProgressLog(text) {
 }
 
 function showNotification(message, type = 'info') {
-    // 简单实现，可以替换为更美观的通知
-    alert(message);
+    // 创建通知元素
+    const notification = document.createElement('div');
+    
+    // 根据类型设置样式和图标
+    let bgColor, iconName, textColor;
+    switch (type) {
+        case 'success':
+            bgColor = 'bg-green-50 border-green-500';
+            textColor = 'text-green-800';
+            iconName = 'carbon:checkmark-filled';
+            break;
+        case 'error':
+            bgColor = 'bg-red-50 border-red-500';
+            textColor = 'text-red-800';
+            iconName = 'carbon:error-filled';
+            break;
+        case 'warning':
+            bgColor = 'bg-yellow-50 border-yellow-500';
+            textColor = 'text-yellow-800';
+            iconName = 'carbon:warning-filled';
+            break;
+        default: // info
+            bgColor = 'bg-blue-50 border-blue-500';
+            textColor = 'text-blue-800';
+            iconName = 'carbon:information-filled';
+    }
+    
+    // 设置通知样式
+    notification.className = `flex items-center p-4 mb-4 max-w-md border-l-4 ${bgColor} ${textColor} shadow-md rounded-r-lg transform transition-all duration-300 ease-in-out`;
+    notification.style.opacity = '0';
+    notification.style.transform = 'translateX(100%)';
+    
+    // 设置通知内容
+    notification.innerHTML = `
+        <iconify-icon icon="${iconName}" class="flex-shrink-0 w-5 h-5 mr-2"></iconify-icon>
+        <div class="ml-3 text-sm font-medium flex-grow">${message}</div>
+        <button type="button" class="ml-auto -mx-1.5 -my-1.5 rounded-lg p-1.5 inline-flex h-8 w-8 hover:bg-gray-200 focus:ring-2 focus:ring-gray-400">
+            <iconify-icon icon="carbon:close" class="w-5 h-5"></iconify-icon>
+        </button>
+    `;
+    
+    // 获取通知容器
+    const container = document.getElementById('notification-container');
+    container.appendChild(notification);
+    
+    // 显示动画
+    setTimeout(() => {
+        notification.style.opacity = '1';
+        notification.style.transform = 'translateX(0)';
+    }, 10);
+    
+    // 添加关闭按钮点击事件
+    const closeButton = notification.querySelector('button');
+    closeButton.addEventListener('click', () => {
+        closeNotification(notification);
+    });
+    
+    // 自动关闭（5秒后）
+    const timeout = setTimeout(() => {
+        closeNotification(notification);
+    }, 5000);
+    
+    // 保存timeout引用，以便可以在手动关闭时清除
+    notification.dataset.timeout = timeout;
+    
+    // 返回通知元素，以便可以手动关闭
+    return notification;
+}
+
+// 关闭通知的辅助函数
+function closeNotification(notification) {
+    // 清除自动关闭的timeout
+    clearTimeout(notification.dataset.timeout);
+    
+    // 淡出动画
+    notification.style.opacity = '0';
+    notification.style.transform = 'translateX(100%)';
+    
+    // 动画完成后移除元素
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+        }
+    }, 300);
 }
 
 function formatFileSize(bytes) {
