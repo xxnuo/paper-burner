@@ -667,7 +667,11 @@ async function translateMarkdown(markdownText, targetLang, model, apiKey) {
 
 4. 仅翻译内容，不要添加额外解释 
 
-5. 对于行间公式，使用$$...$$标记
+5. 对于行间公式，使用：
+$$
+...
+$$
+标记
 
 文档内容：
 
@@ -946,6 +950,11 @@ async function translateLongDocument(markdownText, targetLang, model, apiKey) {
     addProgressLog(`文档被分割为${parts.length}个部分进行翻译`);
     
     let translatedContent = '';
+    
+    // 添加文档头部声明
+    const currentDate = new Date().toISOString().split('T')[0];
+    translatedContent += `> *本文档由 Paper Burner 工具制作 (${currentDate})。内容由 AI 大模型翻译生成，不保证翻译内容的准确性和完整性。*\n\n`;
+    
     for (let i = 0; i < parts.length; i++) {
         updateProgress(`翻译第 ${i+1}/${parts.length} 部分...`, 60 + Math.floor((i / parts.length) * 30));
         addProgressLog(`正在翻译第 ${i+1}/${parts.length} 部分...`);
@@ -972,6 +981,9 @@ async function translateLongDocument(markdownText, targetLang, model, apiKey) {
             translatedContent += `\n\n> **翻译错误 (第 ${i+1} 部分), 使用原语言**: ${error.message}\n\n${parts[i]}\n\n`;
         }
     }
+    
+    // 添加文档底部声明
+    translatedContent += `\n\n---\n> *免责声明：本文档内容由大模型API自动翻译生成，Paper Burner 工具不对翻译内容的准确性、完整性和合法性负责。*`;
     
     return translatedContent;
 }
