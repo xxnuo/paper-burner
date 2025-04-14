@@ -2,7 +2,7 @@
 
 <div align="center">
   <img src="https://img.shields.io/badge/版本-1.0.0-blue.svg" alt="版本">
-  <img src="https://img.shields.io/badge/许可证-GPL-green.svg" alt="许可证">
+  <img src="https://img.shields.io/badge/License-GPL_v2-blue.svg" alt="许可证">
   <img src="https://img.shields.io/badge/Pure-JavaScript-yellow.svg" alt="JavaScript">
 </div>
 
