@@ -81,7 +81,7 @@ Paper Burner是为广大研究生和研究人员设计的PDF文档处理工具�
 
 ## 📄 许可证
 
-本项目采用MIT许可证 - 详见 [LICENSE](LICENSE) 文件
+本项目采用GPL-v2许可证 - 详见 [LICENSE](LICENSE) 文件
 
 
 <div align="center">
