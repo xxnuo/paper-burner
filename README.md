@@ -1,3 +1,5 @@
+[加了多文件上传、简单的并发和重试机制]
+
 # Paper Burner - PDF文档OCR与翻译工具
 
 <div align="center">
