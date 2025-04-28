@@ -874,22 +874,20 @@ ${content}`;
                 responseExtractor: (data) => data.choices[0].message.content
             },
             'volcano-deepseek-v3': {
-                endpoint: 'https://api.volcengine.com/ml/api/v1/open/llm/inference',
+                endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
                 modelName: '火山引擎 DeepSeek v3',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${key}`
                 },
                 bodyBuilder: () => ({
-                    model: "deepseek-v3",
+                    model: "deepseek-v3-250324",
                     messages: [
                         { role: "system", content: sys_prompt },
                         { role: "user", content: translationPromptTemplate }
                     ],
-                    parameters: {
-                        temperature: temperature,
-                        max_tokens: maxTokens
-                    }
+                    temperature: temperature,
+                    max_tokens: Math.min(maxTokens, 16384)
                 }),
                 responseExtractor: (data) => data.choices[0].message.content
             },
