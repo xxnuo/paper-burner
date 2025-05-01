@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="PDF OCR与翻译工具 - 使用 Mistral OCR 提取 PDF 文本并转换为 Markdown，可选择使用 AI 模型进行翻译">
     <title>Paper Burner - PDF文档 OCR与翻译工具</title>
+    <!-- Tailwind CSS & 依赖库 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/iconify-icon@2.0.0/dist/iconify-icon.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
@@ -25,10 +26,31 @@
         .transition-all {
             transition: all 0.3s ease;
         }
+        .file-list-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.5rem;
+            background-color: #f8f9fa;
+            margin-bottom: 0.5rem;
+            border: 1px solid #e9ecef;
+        }
+        .file-list-item:last-child {
+            margin-bottom: 0;
+        }
+        /* Style for Textareas */
+        textarea.api-key-input {
+            min-height: 60px; /* Adjust as needed */
+            resize: vertical; /* Allow vertical resize */
+        }
     </style>
 </head>
 <body class="gradient-bg min-h-screen">
     <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- ===================== -->
+        <!-- 顶部标题与简介 -->
+        <!-- ===================== -->
         <header class="text-center mb-12">
             <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-3">Paper Burner: PDF <span class="text-blue-600">OCR</span> 与翻译工具</h1>
             <p class="text-gray-600 max-w-2xl mx-auto">使用 Mistral OCR 提取 PDF 文本并转换为 Markdown，可选择使用 AI 模型进行全文中文翻译</p>
@@ -37,7 +59,11 @@
         </header>
 
         <main>
+            <!-- ===================== -->
+            <!-- 主功能卡片区域 -->
+            <!-- ===================== -->
             <div class="bg-white rounded-xl shadow-sm p-6 mb-8">
+                <!-- API 密钥设置 -->
                 <div class="mb-6">
                     <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                         <iconify-icon icon="carbon:api" class="mr-2 text-blue-500" width="24"></iconify-icon>
@@ -45,34 +71,29 @@
                     </h2>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
-                            <label for="mistralApiKey" class="block text-sm font-medium text-gray-700 mb-1">Mistral API Key <span class="text-red-500">*</span></label>
+                            <label for="mistralApiKeys" class="block text-sm font-medium text-gray-700 mb-1">Mistral API Keys <span class="text-red-500">*</span> (每行一个)</label>
                             <div class="relative">
-                                <input type="password" id="mistralApiKey" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="输入您的 Mistral API Key">
-                                <button id="toggleMistralKey" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700">
-                                    <iconify-icon icon="carbon:view" width="20"></iconify-icon>
-                                </button>
+                                <textarea id="mistralApiKeys" rows="3" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all api-key-input" placeholder="输入您的 Mistral API Key(s)，每行一个"></textarea>
                             </div>
                             <div class="mt-2 flex items-center">
                                 <input type="checkbox" id="rememberMistralKey" class="rounded text-blue-500 focus:ring-blue-500 mr-2">
-                                <label for="rememberMistralKey" class="text-sm text-gray-600">记住此 API Key</label>
+                                <label for="rememberMistralKey" class="text-sm text-gray-600">记住这些 API Keys</label>
                             </div>
                         </div>
                         <div>
-                            <label for="translationApiKey" class="block text-sm font-medium text-gray-700 mb-1">翻译 API Key (可选)</label>
+                            <label for="translationApiKeys" class="block text-sm font-medium text-gray-700 mb-1">翻译 API Keys (可选, 每行一个)</label>
                             <div class="relative">
-                                <input type="password" id="translationApiKey" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="输入翻译服务 API Key (可选)">
-                                <button id="toggleTranslationKey" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700">
-                                    <iconify-icon icon="carbon:view" width="20"></iconify-icon>
-                                </button>
+                                <textarea id="translationApiKeys" rows="3" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all api-key-input" placeholder="输入翻译服务 API Key(s)，每行一个 (可选)"></textarea>
                             </div>
                             <div class="mt-2 flex items-center">
                                 <input type="checkbox" id="rememberTranslationKey" class="rounded text-blue-500 focus:ring-blue-500 mr-2">
-                                <label for="rememberTranslationKey" class="text-sm text-gray-600">记住此 API Key</label>
+                                <label for="rememberTranslationKey" class="text-sm text-gray-600">记住这些 API Keys</label>
                             </div>
                         </div>
                     </div>
                 </div>
 
+                <!-- 翻译设置 -->
                 <div class="mb-6">
                     <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                         <iconify-icon icon="carbon:translate" class="mr-2 text-blue-500" width="24"></iconify-icon>
@@ -92,69 +113,130 @@
                                 <option value="custom">自定义模型</option>
                             </select>
                         </div>
-                        <div id="customModelSettings" class="hidden mt-4 border-t pt-4 border-gray-200">
-                            <h3 class="text-sm font-medium text-gray-700 mb-3">自定义模型设置</h3>
-                            <div class="grid grid-cols-1 gap-4">
-                                <div>
-                                    <label for="customModelName" class="block text-sm font-medium text-gray-700 mb-1">模型名称</label>
-                                    <input type="text" id="customModelName" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="例如: Claude 3 Opus">
-                                </div>
-                                <div>
-                                    <label for="customApiEndpoint" class="block text-sm font-medium text-gray-700 mb-1">API 端点 URL</label>
-                                    <input type="text" id="customApiEndpoint" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="例如: https://api.example.com/v1/chat/completions">
-                                </div>
-                                <div>
-                                    <label for="customModelId" class="block text-sm font-medium text-gray-700 mb-1">模型 ID</label>
-                                    <input type="text" id="customModelId" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="例如: gpt-4-turbo">
-                                </div>
-                                <div>
-                                    <label for="customRequestFormat" class="block text-sm font-medium text-gray-700 mb-1">请求格式</label>
-                                    <select id="customRequestFormat" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all">
-                                        <option value="openai">OpenAI 格式</option>
-                                        <option value="anthropic">Anthropic 格式</option>
-                                        <option value="gemini">Google Gemini 格式</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
                         <div>
                             <label for="targetLanguage" class="block text-sm font-medium text-gray-700 mb-1">目标语言</label>
                             <select id="targetLanguage" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all">
                                 <option value="chinese">中文</option>
+                                <option value="english">English</option>
+                                <option value="japanese">日本語</option>
+                                <option value="korean">한국어</option>
+                                <option value="french">Français</option>
+                                <option value="custom">自定义</option>
                             </select>
+                            <div id="customTargetLanguageContainer" class="hidden mt-2">
+                                 <label for="customTargetLanguageInput" class="block text-sm font-medium text-gray-700 mb-1">自定义目标语言名称</label>
+                                 <input type="text" id="customTargetLanguageInput" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="例如: Spanish">
+                            </div>
+                        </div>
+                        <!-- 自定义模型设置区域 -->
+                        <div id="customModelSettingsContainer" class="md:col-span-2">
+                            <div class="pt-4">
+                                <button id="customModelSettingsToggle" type="button" class="text-sm text-gray-500 hover:text-gray-700 flex items-center">
+                                    <iconify-icon icon="carbon:settings-adjust" class="mr-1" width="16"></iconify-icon>
+                                    <span>自定义模型设置</span>
+                                    <iconify-icon id="customModelSettingsToggleIcon" icon="carbon:chevron-down" class="ml-1" width="16"></iconify-icon>
+                                </button>
+                                <div id="customModelSettings" class="hidden mt-2 gradient-card border border-gray-200 rounded-lg p-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label for="customApiEndpoint" class="block text-sm font-medium text-gray-700 mb-1">API Endpoint URL <span class="text-red-500">*</span></label>
+                                            <input type="url" id="customApiEndpoint" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="例如: https://api.openai.com/v1/chat/completions">
+                                        </div>
+                                        <div>
+                                            <label for="customModelId" class="block text-sm font-medium text-gray-700 mb-1">模型 ID <span class="text-red-500">*</span></label>
+                                            <input type="text" id="customModelId" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="如: gpt-4-turbo 或 claude-3-opus-20240229">
+                                        </div>
+                                        <div>
+                                            <label for="customRequestFormat" class="block text-sm font-medium text-gray-700 mb-1">请求格式</label>
+                                            <select id="customRequestFormat" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all">
+                                                <option value="openai">OpenAI 格式</option>
+                                                <option value="anthropic">Anthropic 格式</option>
+                                                <option value="gemini">Google Gemini 格式</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label for="customTemperature" class="block text-sm font-medium text-gray-700 mb-1">温度 (temperature)</label>
+                                            <input type="number" id="customTemperature" min="0" max="2" step="0.01" value="0.5" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="0.5">
+                                            <p class="text-xs text-gray-500 mt-1">控制输出的多样性，0~2，默认0.5</p>
+                                        </div>
+                                        <div>
+                                            <label for="customMaxTokens" class="block text-sm font-medium text-gray-700 mb-1">最大 tokens (max_tokens)</label>
+                                            <input type="number" id="customMaxTokens" min="1" max="32768" step="1" value="8000" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="8000">
+                                            <p class="text-xs text-gray-500 mt-1">单次生成最大token数，默认8000</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="mt-4">
+                <hr class="my-6 border-gray-200">
+
+                <!-- 高级设置区域 -->
+                <div class="mt-4 mb-6">
                     <button id="advancedSettingsToggle" class="text-sm text-gray-500 hover:text-gray-700 flex items-center" type="button">
                         <iconify-icon icon="carbon:settings-adjust" class="mr-1" width="16"></iconify-icon>
                         <span>高级设置</span>
                         <iconify-icon icon="carbon:chevron-down" class="ml-1" width="16" id="advancedSettingsIcon"></iconify-icon>
                     </button>
-                    
-                    <div id="advancedSettings" class="hidden mt-3 pt-3 border-t border-gray-100">
-                        <div class="grid grid-cols-1 gap-4">
-                            <div>
-                                <label for="maxTokensPerChunk" class="block text-sm font-medium text-gray-700 mb-1">每段最大Token数</label>
-                                <div class="flex items-center">
-                                    <input type="range" id="maxTokensPerChunk" min="500" max="10000" step="100" value="2000" 
-                                        class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
-                                    <span id="maxTokensPerChunkValue" class="ml-2 text-sm text-gray-600 min-w-[50px]">2000</span>
+
+                    <div id="advancedSettings" class="hidden mt-2">
+                        <div class="bg-white rounded-lg shadow-md border border-gray-200 p-6">
+                            <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2 flex items-center"><iconify-icon icon="carbon:settings-check" class="mr-2 text-gray-600"></iconify-icon>性能与流程设置</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                <div>
+                                    <label for="concurrencyLevel" class="block text-sm font-medium text-gray-700 mb-1">文件处理并发数</label>
+                                    <input type="number" id="concurrencyLevel" min="1" max="10" value="1"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm">
+                                    <p class="text-xs text-gray-500 mt-1">同时处理的 PDF 文件数量。默认 1。</p>
                                 </div>
-                                <p class="text-xs text-gray-500 mt-1">默认为2000，较小的值会导致更多的分段，较大的值可能超出模型上下文限制或导致超时</p>
+                                <div>
+                                    <label for="translationConcurrencyLevel" class="block text-sm font-medium text-gray-700 mb-1">翻译任务并发数</label>
+                                    <input type="number" id="translationConcurrencyLevel" min="1" max="150" value="2"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm">
+                                    <p class="text-xs text-gray-500 mt-1">同时进行的翻译 API 调用数量。默认 2。</p>
+                                </div>
+                                <div class="md:col-span-2">
+                                    <label for="maxTokensPerChunk" class="block text-sm font-medium text-gray-700 mb-1">翻译分段最大Token数 (<span id="maxTokensPerChunkValue">2000</span>)</label>
+                                    <input type="range" id="maxTokensPerChunk" min="500" max="10000" step="100" value="2000"
+                                           class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                                    <p class="text-xs text-gray-500 mt-1">长文档翻译时，按此限制分段。默认 2000。</p>
+                                </div>
+                                <div class="md:col-span-2 flex items-center mt-2">
+                                    <input type="checkbox" id="skipProcessedFiles" class="rounded text-blue-500 focus:ring-blue-500 h-4 w-4 mr-2 flex-shrink-0">
+                                    <label for="skipProcessedFiles" class="text-sm text-gray-600">跳过已处理过的文件 (基于文件名和大小)</label>
+                                </div>
                             </div>
+
+                            <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2 flex items-center"><iconify-icon icon="carbon:edit" class="mr-2 text-gray-600"></iconify-icon>自定义翻译提示</h3>
+                             <div class="flex items-center mb-3">
+                                 <input type="checkbox" id="useCustomPromptsCheckbox" class="rounded text-blue-500 focus:ring-blue-500 h-4 w-4 mr-2 flex-shrink-0">
+                                 <label for="useCustomPromptsCheckbox" class="text-sm font-medium text-gray-700">启用自定义提示 (覆盖内置提示)</label>
+                             </div>
+                             <p class="text-xs text-gray-500 mb-4">启用后可修改下方用于翻译的系统提示和用户提示模板。如果留空，将使用通用后备提示。可用占位符：<code><strong>${targetLangName}</strong></code>, <code><strong>${content}</strong></code>。</p>
+                            <div id="customPromptsContainer" class="hidden space-y-4">
+                                <div>
+                                    <label for="defaultSystemPrompt" class="block text-sm font-medium text-gray-700 mb-1">自定义系统提示</label>
+                                    <textarea id="defaultSystemPrompt" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all api-key-input text-sm disabled:opacity-50 disabled:bg-gray-100" placeholder="启用后可编辑..." disabled></textarea>
+                                </div>
+                                <div>
+                                    <label for="defaultUserPromptTemplate" class="block text-sm font-medium text-gray-700 mb-1">自定义用户提示模板</label>
+                                    <textarea id="defaultUserPromptTemplate" rows="6" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all api-key-input text-sm disabled:opacity-50 disabled:bg-gray-100" placeholder="启用后可编辑..." disabled></textarea>
+                                </div>
+                             </div>
                         </div>
                     </div>
                 </div>
 
+                <!-- PDF 文件上传区域 -->
                 <div class="mb-6">
                     <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                        <iconify-icon icon="carbon:document-pdf" class="mr-2 text-blue-500" width="24"></iconify-icon>
-                        PDF 文件上传
+                        <iconify-icon icon="carbon:document-multiple-01" class="mr-2 text-blue-500" width="24"></iconify-icon>
+                        PDF 文件上传 (可多选)
                     </h2>
-                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center" id="dropZone">
-                        <input type="file" id="pdfFileInput" accept=".pdf" class="hidden">
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center mb-4" id="dropZone">
+                        <input type="file" id="pdfFileInput" accept=".pdf" class="hidden" multiple>
                         <div class="mx-auto mb-4 w-16 h-16 flex items-center justify-center rounded-full bg-blue-50">
                             <iconify-icon icon="carbon:upload" class="text-blue-500" width="32"></iconify-icon>
                         </div>
@@ -163,23 +245,19 @@
                         <button id="browseFilesBtn" class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
                             浏览文件
                         </button>
-                        <div id="fileInfo" class="hidden mt-4 flex items-center justify-center text-left">
-                            <div class="mr-3">
-                                <iconify-icon icon="carbon:document-pdf" class="text-red-500" width="32"></iconify-icon>
-                            </div>
-                            <div>
-                                <p id="fileName" class="text-sm font-medium text-gray-800"></p>
-                                <p id="fileSize" class="text-xs text-gray-500"></p>
-                            </div>
-                            <button id="removeFileBtn" class="ml-4 text-gray-400 hover:text-gray-600">
-                                <iconify-icon icon="carbon:close" width="20"></iconify-icon>
-                            </button>
+                    </div>
+                    <div id="fileListContainer" class="max-h-60 overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50 hidden">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-sm font-medium text-gray-700">已选文件:</span>
+                            <button id="clearFilesBtn" class="text-sm text-red-500 hover:text-red-700">清空列表</button>
+                        </div>
+                        <div id="fileList">
+                            <!-- File items will be added here by JavaScript -->
                         </div>
                     </div>
                 </div>
 
-             
-
+                <!-- 处理按钮 -->
                 <div class="flex justify-center mt-8">
                     <button id="processBtn" class="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
                         <iconify-icon icon="carbon:play" class="mr-2" width="20"></iconify-icon>
@@ -188,74 +266,75 @@
                 </div>
             </div>
 
-            <div id="resultsSection" class="bg-white rounded-xl shadow-sm p-6 mb-8 hidden">
-                <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                    <iconify-icon icon="carbon:document" class="mr-2 text-blue-500" width="24"></iconify-icon>
-                    处理结果
-                </h2>
-                
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="gradient-card rounded-lg p-4 border border-gray-100 shadow-sm">
-                        <h3 class="font-medium text-gray-800 mb-2 flex items-center">
-                            <iconify-icon icon="carbon:markdown" class="mr-2 text-blue-500" width="20"></iconify-icon>
-                            Markdown 内容
-                        </h3>
-                        <div id="markdownPreview" class="h-40 overflow-auto bg-gray-50 rounded p-3 text-sm text-gray-700 font-mono"></div>
-                        <button id="downloadMarkdownBtn" class="mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center w-full">
-                            <iconify-icon icon="carbon:download" class="mr-2" width="16"></iconify-icon>
-                            <span>下载 Markdown</span>
-                        </button>
-                    </div>
-                    
-                    <div class="gradient-card rounded-lg p-4 border border-gray-100 shadow-sm" id="translationResultCard">
-                        <h3 class="font-medium text-gray-800 mb-2 flex items-center">
-                            <iconify-icon icon="carbon:translate" class="mr-2 text-blue-500" width="20"></iconify-icon>
-                            翻译内容
-                        </h3>
-                        <div id="translationPreview" class="h-40 overflow-auto bg-gray-50 rounded p-3 text-sm text-gray-700"></div>
-                        <button id="downloadTranslationBtn" class="mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center w-full">
-                            <iconify-icon icon="carbon:download" class="mr-2" width="16"></iconify-icon>
-                            <span>下载翻译</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
+            <!-- ===================== -->
+            <!-- 进度与结果区域 -->
+            <!-- ===================== -->
             <div id="progressSection" class="bg-white rounded-xl shadow-sm p-6 mb-8 hidden">
                 <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
                     <iconify-icon icon="carbon:progress-bar" class="mr-2 text-blue-500" width="24"></iconify-icon>
                     处理进度
                 </h2>
-                
+                <div class="mb-2">
+                    <span id="batchProgressText" class="text-sm font-medium text-gray-700"></span>
+                </div>
+                 <div class="mb-2">
+                    <span id="concurrentProgressText" class="text-sm font-medium text-gray-600"></span>
+                </div>
                 <div class="mb-4">
                     <div class="flex justify-between mb-1">
-                        <span id="progressStep" class="text-sm font-medium text-gray-700">OCR处理中...</span>
+                        <span id="progressStep" class="text-sm font-medium text-gray-700">等待开始...</span>
                         <span id="progressPercentage" class="text-sm font-medium text-gray-700">0%</span>
                     </div>
                     <div class="w-full bg-gray-200 rounded-full h-2.5">
-                        <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                        <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
                     </div>
                 </div>
-                
-                <div id="progressLog" class="bg-gray-50 rounded-lg p-4 h-32 overflow-auto text-sm text-gray-600 font-mono"></div>
+                <div id="progressLog" class="bg-gray-50 rounded-lg p-4 h-40 overflow-auto text-sm text-gray-600 font-mono"></div>
+            </div>
+
+            <div id="resultsSection" class="bg-white rounded-xl shadow-sm p-6 mb-8 hidden">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                    <iconify-icon icon="carbon:document-download" class="mr-2 text-blue-500" width="24"></iconify-icon>
+                    处理完成
+                </h2>
+                <p class="text-gray-600 mb-4">所有文件处理完成。您可以下载包含所有结果的 ZIP 文件。</p>
+                <div id="resultsSummary" class="mb-4 text-sm text-gray-700">
+                    <!-- Summary will be added here -->
+                </div>
+                <button id="downloadAllBtn" class="mt-3 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 flex items-center justify-center w-full md:w-auto">
+                    <iconify-icon icon="carbon:download" class="mr-2" width="20"></iconify-icon>
+                    <span>下载全部结果 (ZIP)</span>
+                </button>
             </div>
         </main>
 
+        <!-- ===================== -->
+        <!-- 页脚 -->
+        <!-- ===================== -->
         <footer class="text-center text-gray-500 text-sm mt-12">
-<p class="mb-2">
-    <a href="https://github.com/baoyudu/ocrpdf" class="text-blue-500 hover:text-blue-700 transition-colors" target="_blank" rel="noopener noreferrer">
-        <iconify-icon icon="carbon:logo-github" class="mr-1" inline></iconify-icon>
-        GitHub
-    </a>
-</p>
 
+        <p class="mb-2">
+            <a href="https://github.com/baoyudu/ocrpdf" class="text-blue-500 hover:text-blue-700 transition-colors" target="_blank" rel="noopener noreferrer">
+                <iconify-icon icon="carbon:logo-github" class="mr-1" inline></iconify-icon>
+                GitHub
+            </a>
+        </p>
         </footer>
     </div>
 
-    <!-- 通知系统 -->
-    <div id="notification-container" class="fixed top-4 right-4 z-50 flex flex-col items-end space-y-2 pointer-events-none"></div>
-    
+    <!-- ===================== -->
+    <!-- 通知系统浮层 -->
+    <!-- ===================== -->
+    <div id="notification-container" class="fixed top-4 right-4 z-50 flex flex-col items-end space-y-2 pointer-events-none max-w-sm"></div>
+
+    <!-- ===================== -->
+    <!-- 脚本引入区（顺序不能乱） -->
+    <!-- ===================== -->
     <script src="https://unpkg.com/iconify-icon@1.0.7/dist/iconify-icon.min.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/storage.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/processing.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
