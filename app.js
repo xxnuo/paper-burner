@@ -1,448 +1,322 @@
-// 全局变量
-let pdfFiles = []; // Changed from pdfFile to handle multiple files
-let allResults = []; // To store results for each file
-let processedFilesRecord = {}; // To keep track of processed files { 'filename_size': true }
-let isProcessing = false; // Flag to prevent multiple concurrent processes
-let activeProcessingCount = 0; // Track active concurrent tasks
-let apiKeyManager = { // Object to manage API keys and rotation
-    mistral: { keys: [], index: 0 },
-    translation: { keys: [], index: 0 },
+// app.js - 主入口点和事件协调器
 
-    // Parses keys from textarea value (newline-separated)
-    parseKeys: function(keyType) {
-        const textarea = keyType === 'mistral' ? mistralApiKeysTextarea : translationApiKeysTextarea;
-        this[keyType].keys = textarea.value
-            .split('\n')
-            .map(k => k.trim())
-            .filter(k => k !== ''); // Filter out empty lines
-        this[keyType].index = 0;
-        console.log(`Parsed ${this[keyType].keys.length} ${keyType} keys.`);
-        return this[keyType].keys.length > 0;
-    },
+// =====================
+// 全局状态变量与并发控制
+// =====================
+let pdfFiles = [];
+let allResults = [];
+let processedFilesRecord = {};
+let isProcessing = false;
+let activeProcessingCount = 0;
+let retryAttempts = new Map();
+const MAX_RETRIES = 3;
 
-    // Gets the next key in a round-robin fashion
-    getNextKey: function(keyType) {
-        if (!this[keyType] || this[keyType].keys.length === 0) {
-            return null; // No keys available
-        }
-        const key = this[keyType].keys[this[keyType].index];
-        this[keyType].index = (this[keyType].index + 1) % this[keyType].keys.length;
-        return key;
-    },
-
-    getMistralKey: function() { return this.getNextKey('mistral'); },
-    getTranslationKey: function() { return this.getNextKey('translation'); }
+// --- 全局翻译并发控制 ---
+let translationSemaphore = {
+    limit: 2, // 默认翻译并发数，可由设置覆盖
+    count: 0,
+    queue: []
 };
 
-let retryAttempts = new Map(); // Track retry attempts per file identifier
-const MAX_RETRIES = 3; // Maximum number of retries per file
-
-// DOM 元素
-const mistralApiKeysTextarea = document.getElementById('mistralApiKeys'); // Updated ID
-const rememberMistralKeyCheckbox = document.getElementById('rememberMistralKey');
-const translationApiKeysTextarea = document.getElementById('translationApiKeys'); // Updated ID
-const rememberTranslationKeyCheckbox = document.getElementById('rememberTranslationKey');
-
-const translationModelSelect = document.getElementById('translationModel');
-const customModelSettingsContainer = document.getElementById('customModelSettingsContainer'); // Container for custom settings
-const customModelSettings = document.getElementById('customModelSettings');
-
-// 高级设置相关
-const advancedSettingsToggle = document.getElementById('advancedSettingsToggle');
-const advancedSettings = document.getElementById('advancedSettings');
-const advancedSettingsIcon = document.getElementById('advancedSettingsIcon');
-const maxTokensPerChunk = document.getElementById('maxTokensPerChunk');
-const maxTokensPerChunkValue = document.getElementById('maxTokensPerChunkValue');
-const skipProcessedFilesCheckbox = document.getElementById('skipProcessedFiles');
-const concurrencyLevelInput = document.getElementById('concurrencyLevel'); // New concurrency input
-
-// 文件上传相关
-const dropZone = document.getElementById('dropZone');
-const pdfFileInput = document.getElementById('pdfFileInput');
-const browseFilesBtn = document.getElementById('browseFilesBtn');
-const fileListContainer = document.getElementById('fileListContainer'); // New container for file list
-const fileList = document.getElementById('fileList'); // New list element
-const clearFilesBtn = document.getElementById('clearFilesBtn'); // New clear button
-
-// 翻译相关
-const targetLanguage = document.getElementById('targetLanguage');
-
-// 按钮
-const processBtn = document.getElementById('processBtn');
-const downloadAllBtn = document.getElementById('downloadAllBtn'); // New download all button
-
-// 结果展示
-const resultsSection = document.getElementById('resultsSection');
-const resultsSummary = document.getElementById('resultsSummary'); // New summary element
-
-// 进度相关
-const progressSection = document.getElementById('progressSection');
-const batchProgressText = document.getElementById('batchProgressText'); // New batch progress text
-const concurrentProgressText = document.getElementById('concurrentProgressText'); // New concurrent progress text
-const progressStep = document.getElementById('progressStep');
-const progressPercentage = document.getElementById('progressPercentage');
-const progressBar = document.getElementById('progressBar');
-const progressLog = document.getElementById('progressLog');
-
-document.addEventListener('DOMContentLoaded', () => {
-    // 初始化 - 从本地存储加载 API Key (Handles multiple keys)
-    if (localStorage.getItem('mistralApiKeys')) {
-        mistralApiKeysTextarea.value = localStorage.getItem('mistralApiKeys');
-        rememberMistralKeyCheckbox.checked = true;
-    }
-
-    if (localStorage.getItem('translationApiKeys')) {
-        translationApiKeysTextarea.value = localStorage.getItem('translationApiKeys');
-        rememberTranslationKeyCheckbox.checked = true;
-    }
-
-    // 加载设置 (including skipProcessedFiles state and concurrency)
-    loadSettings();
-
-    // 加载已处理文件记录
-    loadProcessedFilesRecord();
-
-    // API Key 记住选项 (Now for textareas)
-    rememberMistralKeyCheckbox.addEventListener('change', () => {
-        updateApiKeyStorage('mistralApiKeys', mistralApiKeysTextarea.value, rememberMistralKeyCheckbox.checked);
-    });
-
-    rememberTranslationKeyCheckbox.addEventListener('change', () => {
-        updateApiKeyStorage('translationApiKeys', translationApiKeysTextarea.value, rememberTranslationKeyCheckbox.checked);
-    });
-
-    mistralApiKeysTextarea.addEventListener('input', () => {
-        if (rememberMistralKeyCheckbox.checked) {
-            localStorage.setItem('mistralApiKeys', mistralApiKeysTextarea.value);
-        }
-        updateProcessButtonState(); // Update button state on key input
-    });
-
-    translationApiKeysTextarea.addEventListener('input', () => {
-        if (rememberTranslationKeyCheckbox.checked) {
-            localStorage.setItem('translationApiKeys', translationApiKeysTextarea.value);
-        }
-        updateTranslationUIVisibility(); // Need to check if keys exist now
-    });
-
-    // PDF 文件拖放上传
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        if (isProcessing) return; // Prevent drop during processing
-        dropZone.classList.add('border-blue-500', 'bg-blue-50');
-    });
-
-    dropZone.addEventListener('dragleave', () => {
-        dropZone.classList.remove('border-blue-500', 'bg-blue-50');
-    });
-
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        if (isProcessing) return; // Prevent drop during processing
-        dropZone.classList.remove('border-blue-500', 'bg-blue-50');
-        handleFileSelection(e.dataTransfer.files);
-    });
-
-    // 浏览文件按钮
-    browseFilesBtn.addEventListener('click', () => {
-        if (isProcessing) return; // Prevent browse during processing
-        pdfFileInput.click();
-    });
-
-    // 文件选择处理
-    pdfFileInput.addEventListener('change', (e) => {
-        if (isProcessing) return; // Prevent selection change during processing
-        handleFileSelection(e.target.files);
-        // Reset the input value to allow selecting the same file(s) again
-        e.target.value = null;
-    });
-
-    // 清空文件列表按钮
-    clearFilesBtn.addEventListener('click', () => {
-        if (isProcessing) return; // Prevent clear during processing
-        pdfFiles = [];
-        updateFileListUI();
-        updateProcessButtonState();
-    });
-
-    // 处理按钮
-    processBtn.addEventListener('click', async () => {
-        if (isProcessing) return; // Prevent starting if already processing
-
-        // 1. Parse API Keys
-        if (!apiKeyManager.parseKeys('mistral')) {
-            showNotification('请输入至少一个有效的 Mistral API Key', 'error');
-            return;
-        }
-        const translationModel = translationModelSelect.value;
-        if (translationModel !== 'none' && !apiKeyManager.parseKeys('translation')) {
-            showNotification(`选择了 ${translationModel} 翻译模型，请输入至少一个有效的翻译 API Key`, 'error');
-            return;
-        }
-
-        if (pdfFiles.length === 0) {
-            showNotification('请选择至少一个 PDF 文件', 'error');
-            return;
-        }
-
-        // 2. Validate Custom Model Settings if necessary
-        if (translationModel === 'custom') {
-            const customModelName = document.getElementById('customModelName').value.trim();
-            const customApiEndpoint = document.getElementById('customApiEndpoint').value.trim();
-            const customModelId = document.getElementById('customModelId').value.trim();
-            if (!customModelName || !customApiEndpoint || !customModelId) {
-                showNotification('请填写完整的自定义模型信息', 'error');
-                return;
-            }
-        }
-
-        // 3. Setup Processing State
-        isProcessing = true;
-        activeProcessingCount = 0;
-        retryAttempts.clear(); // Clear previous retry counts
-        processBtn.disabled = true;
-        processBtn.innerHTML = `<iconify-icon icon="carbon:hourglass" class="mr-2 animate-spin" width="20"></iconify-icon> <span>处理中...</span>`;
-        showProgressSection();
-        addProgressLog('=== 开始批量处理 ===');
-        allResults = new Array(pdfFiles.length); // Initialize results array with fixed size
-
-        const concurrencyLevel = parseInt(concurrencyLevelInput.value) || 1;
-        addProgressLog(`设置并发数: ${concurrencyLevel}, 最大重试次数: ${MAX_RETRIES}`);
-        updateConcurrentProgress(0); // Initialize concurrent progress text
-
-        let successCount = 0;
-        let skippedCount = 0;
-        let errorCount = 0;
-        // Use a Set to manage indices of files pending processing (including retries)
-        const pendingIndices = new Set();
-        const filesToProcess = pdfFiles.slice(); // Create a copy
-        const skipEnabled = skipProcessedFilesCheckbox.checked;
-
-        // Initial population of pending indices, skipping already processed files
-        for (let i = 0; i < filesToProcess.length; i++) {
-            const file = filesToProcess[i];
-            const fileIdentifier = `${file.name}_${file.size}`;
-            if (skipEnabled && isAlreadyProcessed(fileIdentifier)) {
-                addProgressLog(`[${file.name}] 已处理过，跳过初始处理。`);
-                skippedCount++;
-                allResults[i] = { file: file, skipped: true }; // Mark as skipped in results
-            } else {
-                pendingIndices.add(i); // Add index to the processing set
-            }
-        }
-
-        // Update initial progress based on skipped files
-        updateOverallProgress(successCount, skippedCount, errorCount, filesToProcess.length);
-
-        // 4. Concurrency Control Logic with Retries
-        const processQueue = async () => {
-            // Keep looping as long as there are pending files or active tasks
-            while (pendingIndices.size > 0 || activeProcessingCount > 0) {
-                // Check if we can start a new task
-                while (pendingIndices.size > 0 && activeProcessingCount < concurrencyLevel) {
-                    // Get the next index from the set
-                    const currentFileIndex = pendingIndices.values().next().value;
-                    pendingIndices.delete(currentFileIndex); // Remove from pending set
-
-                    const currentFile = filesToProcess[currentFileIndex];
-                    const fileIdentifier = `${currentFile.name}_${currentFile.size}`;
-                    const currentRetry = retryAttempts.get(fileIdentifier) || 0;
-
-                    // Increment active count and launch the task
-                    activeProcessingCount++;
-                    updateConcurrentProgress(activeProcessingCount);
-
-                    const retryText = currentRetry > 0 ? ` (重试 ${currentRetry}/${MAX_RETRIES})` : '';
-                    addProgressLog(`--- [${successCount + skippedCount + errorCount + 1}/${filesToProcess.length}] 开始处理: ${currentFile.name}${retryText} ---`);
-
-                    // Get keys for this specific task
-                    const mistralKeyForTask = apiKeyManager.getMistralKey();
-                    const translationKeyForTask = apiKeyManager.getTranslationKey();
-
-                    // Process the file (async)
-                    processSinglePdf(currentFile, mistralKeyForTask, translationKeyForTask, translationModel)
-                        .then(result => {
-                            if (result && !result.error) {
-                                allResults[currentFileIndex] = result;
-                                markFileAsProcessed(fileIdentifier);
-                                addProgressLog(`[${currentFile.name}] 处理成功！`);
-                                successCount++;
-                                retryAttempts.delete(fileIdentifier); // Clear retry count on success
-                            } else {
-                                // Handle failure and potential retry
-                                const errorMsg = result?.error || '未知错误';
-                                const nextRetryCount = (retryAttempts.get(fileIdentifier) || 0) + 1;
-
-                                if (nextRetryCount <= MAX_RETRIES) {
-                                    retryAttempts.set(fileIdentifier, nextRetryCount);
-                                    pendingIndices.add(currentFileIndex); // Add back to the queue for retry
-                                    addProgressLog(`[${currentFile.name}] 处理失败: ${errorMsg}. 将在稍后重试 (${nextRetryCount}/${MAX_RETRIES}).`);
-                                } else {
-                                    addProgressLog(`[${currentFile.name}] 处理失败: ${errorMsg}. 已达到最大重试次数 (${MAX_RETRIES}).`);
-                                    allResults[currentFileIndex] = result || { file: currentFile, error: errorMsg };
-                                    errorCount++; // Increment final error count
-                                    retryAttempts.delete(fileIdentifier); // Clear retry count after final failure
-                                }
-                            }
-                        })
-                        .catch(error => {
-                            // Catch unexpected errors from processSinglePdf itself
-                            console.error(`处理文件 ${currentFile.name} 时发生意外错误:`, error);
-                            addProgressLog(`错误: 处理文件 ${currentFile.name} 失败 - ${error.message}`);
-                            allResults[currentFileIndex] = { file: currentFile, error: error.message };
-                            errorCount++;
-                            retryAttempts.delete(fileIdentifier);
-                        })
-                        .finally(() => {
-                            // Task finished (success, retry scheduled, or final failure)
-                            activeProcessingCount--;
-                            updateConcurrentProgress(activeProcessingCount);
-                            // Update overall progress based on completed states
-                            updateOverallProgress(successCount, skippedCount, errorCount, filesToProcess.length);
-                        });
-
-                    // Optional slight delay between starting tasks
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                }
-
-                // If loop exits, either queue is empty or concurrency limit reached.
-                // If queue is not empty but limit is reached, or if queue is empty but tasks are active,
-                // wait before checking again.
-                if (pendingIndices.size > 0 || activeProcessingCount > 0) {
-                    await new Promise(resolve => setTimeout(resolve, 200)); // Wait before checking queue/active count again
-                }
-            }
-        };
-
-        // 5. Start processing and handle completion
-        try {
-            await processQueue(); // Run the concurrent processing with retries
-        } catch (err) {
-            console.error("处理队列时发生错误:", err);
-            addProgressLog(`严重错误: 处理队列失败 - ${err.message}`);
-            // Estimate final error count if queue logic fails catastrophically
-            const currentCompleted = successCount + skippedCount + errorCount;
-            errorCount = filesToProcess.length - currentCompleted;
-        } finally {
-            addProgressLog('=== 批量处理完成 ===');
-            updateOverallProgress(successCount, skippedCount, errorCount, filesToProcess.length);
-            updateProgress('全部完成!', 100);
-            updateConcurrentProgress(0);
-
-            isProcessing = false;
-            processBtn.disabled = false; // Re-enable button
-            processBtn.innerHTML = `<iconify-icon icon="carbon:play" class="mr-2" width="20"></iconify-icon> <span>开始处理</span>`;
-            showResultsSection(successCount, skippedCount, errorCount);
-            saveProcessedFilesRecord(); // Save the updated record
-
-            // Clean up the results array (remove empty slots if any)
-            allResults = allResults.filter(r => r !== undefined && r !== null);
-            console.log("Final results count:", allResults.length);
-        }
-    });
-
-    // 下载按钮 (Now Download All)
-    downloadAllBtn.addEventListener('click', () => {
-        if (allResults.length > 0) {
-            downloadAllResults();
-        } else {
-            showNotification('没有可下载的结果', 'warning');
-        }
-    });
-
-    // 翻译模型变更
-    translationModelSelect.addEventListener('change', function() {
-        if (this.value === 'custom') {
-            customModelSettingsContainer.classList.remove('hidden'); // Show the container
-            customModelSettings.classList.remove('hidden'); // Show the settings fields
-        } else {
-            customModelSettingsContainer.classList.add('hidden'); // Hide the container
-            customModelSettings.classList.add('hidden'); // Hide the settings fields
-        }
-        updateTranslationUIVisibility();
-        saveSettings();
-    });
-
-    // 高级设置开关
-    advancedSettingsToggle.addEventListener('click', function() {
-        advancedSettings.classList.toggle('hidden');
-        advancedSettingsIcon.setAttribute('icon', advancedSettings.classList.contains('hidden') ? 'carbon:chevron-down' : 'carbon:chevron-up');
-        // No need to save settings here, handled by individual controls
-    });
-
-    // 最大Token数设置滑动条
-    maxTokensPerChunk.addEventListener('input', function() {
-        maxTokensPerChunkValue.textContent = this.value;
-        saveSettings(); // Save on change
-    });
-
-    // 跳过已处理文件复选框
-    skipProcessedFilesCheckbox.addEventListener('change', function() {
-        saveSettings(); // Save on change
-    });
-
-    // 并发级别输入框
-    concurrencyLevelInput.addEventListener('input', function() {
-        // Optional: Add validation or clamp value
-        let value = parseInt(this.value);
-        if (isNaN(value) || value < 1) value = 1;
-        if (value > 10) value = 10; // Limit max concurrency for safety
-        this.value = value;
-        saveSettings(); // Save on change
-    });
-
-    // 为自定义模型设置添加变更事件监听器
-    const customModelInputs = [
-        document.getElementById('customModelName'),
-        document.getElementById('customApiEndpoint'),
-        document.getElementById('customModelId'),
-        document.getElementById('customRequestFormat')
-    ];
-
-    customModelInputs.forEach(input => {
-        input.addEventListener('change', saveSettings); // Save on change
-        input.addEventListener('input', saveSettings); // Save on input
-    });
-
-    // 初始化 UI 状态
-    updateProcessButtonState();
-    updateTranslationUIVisibility();
-    // Ensure custom model settings visibility is correct on load
-    if (translationModelSelect.value === 'custom') {
-        customModelSettingsContainer.classList.remove('hidden');
-        customModelSettings.classList.remove('hidden');
+/**
+ * 获取一个翻译并发槽（信号量实现）
+ */
+async function acquireTranslationSlot() {
+    if (translationSemaphore.count < translationSemaphore.limit) {
+        translationSemaphore.count++;
+        return Promise.resolve();
     } else {
-        customModelSettingsContainer.classList.add('hidden');
-        customModelSettings.classList.add('hidden');
-    }
-});
-
-// 辅助函数
-
-// Toggle password visibility
-// function togglePasswordVisibility(inputElement, buttonElement) { ... }
-
-// Update API Key in localStorage
-function updateApiKeyStorage(keyName, value, shouldRemember) {
-    if (shouldRemember) {
-        localStorage.setItem(keyName, value);
-    } else {
-        localStorage.removeItem(keyName);
+        return new Promise(resolve => {
+            translationSemaphore.queue.push(resolve);
+        });
     }
 }
 
-// Handle single or multiple file selections
-function handleFileSelection(selectedFiles) {
-    if (!selectedFiles || selectedFiles.length === 0) return;
+/**
+ * 释放一个翻译并发槽
+ */
+function releaseTranslationSlot() {
+    translationSemaphore.count--;
+    if (translationSemaphore.queue.length > 0) {
+        const nextResolve = translationSemaphore.queue.shift();
+        acquireTranslationSlot().then(nextResolve);
+    }
+}
 
-    const newlyAddedFiles = [];
+// =====================
+// DOMContentLoaded 入口初始化
+// =====================
+document.addEventListener('DOMContentLoaded', () => {
+    // 1. 加载设置和已处理文件记录
+    const settings = loadSettings();
+    processedFilesRecord = loadProcessedFilesRecord();
+
+    // 2. 应用设置到 UI
+    applySettingsToUI(settings);
+
+    // 3. 加载 API Keys（如有记住）
+    loadApiKeysFromStorage();
+
+    // 4. 初始化 UI 状态
+    updateFileListUI(pdfFiles, isProcessing, handleRemoveFile);
+    updateProcessButtonState(pdfFiles, isProcessing);
+    updateTranslationUIVisibility(isProcessing);
+
+    // 5. 绑定所有事件
+    setupEventListeners();
+});
+
+// =====================
+// UI 设置应用
+// =====================
+function applySettingsToUI(settings) {
+    // 解构所有设置项
+    const {
+        maxTokensPerChunk: maxTokensVal,
+        skipProcessedFiles,
+        selectedTranslationModel: modelVal,
+        concurrencyLevel: concurrencyVal,
+        translationConcurrencyLevel: translationConcurrencyVal,
+        targetLanguage: targetLangVal,
+        customTargetLanguageName: customLangNameVal,
+        customModelSettings: cms,
+        defaultSystemPrompt: defaultSysPromptVal,
+        defaultUserPromptTemplate: defaultUserPromptVal,
+        useCustomPrompts: useCustomPromptsVal
+    } = settings;
+
+    // 应用到各 DOM 元素
+    const maxTokensSlider = document.getElementById('maxTokensPerChunk');
+    if (maxTokensSlider) {
+        maxTokensSlider.value = maxTokensVal;
+        document.getElementById('maxTokensPerChunkValue').textContent = maxTokensVal;
+    }
+    document.getElementById('skipProcessedFiles').checked = skipProcessedFiles;
+    const translationModelSelect = document.getElementById('translationModel');
+    if (translationModelSelect) translationModelSelect.value = modelVal;
+    const concurrencyInput = document.getElementById('concurrencyLevel');
+    if (concurrencyInput) concurrencyInput.value = concurrencyVal;
+    const translationConcurrencyInput = document.getElementById('translationConcurrencyLevel');
+    if (translationConcurrencyInput) translationConcurrencyInput.value = translationConcurrencyVal;
+    const targetLanguageSelect = document.getElementById('targetLanguage');
+    if (targetLanguageSelect) targetLanguageSelect.value = targetLangVal || 'chinese';
+    const customTargetLanguageInput = document.getElementById('customTargetLanguageInput');
+    if (customTargetLanguageInput) customTargetLanguageInput.value = customLangNameVal || '';
+    const useCustomPromptsCheckbox = document.getElementById('useCustomPromptsCheckbox');
+    if (useCustomPromptsCheckbox) useCustomPromptsCheckbox.checked = useCustomPromptsVal || false;
+
+    // 自定义模型设置
+    if (modelVal === 'custom' && cms) {
+        const apiEndpointInput = document.getElementById('customApiEndpoint');
+        const modelIdInput = document.getElementById('customModelId');
+        const requestFormatInput = document.getElementById('customRequestFormat');
+        const temperatureInput = document.getElementById('customTemperature');
+        const maxTokensInput = document.getElementById('customMaxTokens');
+        if (apiEndpointInput) apiEndpointInput.value = cms.apiEndpoint || '';
+        if (modelIdInput) modelIdInput.value = cms.modelId || '';
+        if (requestFormatInput) requestFormatInput.value = cms.requestFormat || 'openai';
+        if (temperatureInput) temperatureInput.value = (cms.temperature !== undefined ? cms.temperature : 0.5);
+        if (maxTokensInput) maxTokensInput.value = (cms.max_tokens !== undefined ? cms.max_tokens : 8000);
+    }
+    // 触发 UI 相关联动
+    updateTranslationUIVisibility(isProcessing);
+    updateCustomLanguageInputVisibility();
+    updatePromptTextareasContent();
+}
+
+// =====================
+// API Key 加载
+// =====================
+function loadApiKeysFromStorage() {
+    const mistralKeysText = localStorage.getItem('mistralApiKeys');
+    const translationKeysText = localStorage.getItem('translationApiKeys');
+
+    if (mistralKeysText) {
+        document.getElementById('mistralApiKeys').value = mistralKeysText;
+        document.getElementById('rememberMistralKey').checked = true;
+    }
+    if (translationKeysText) {
+        document.getElementById('translationApiKeys').value = translationKeysText;
+        document.getElementById('rememberTranslationKey').checked = true;
+    }
+}
+
+// =====================
+// 事件监听器绑定
+// =====================
+function setupEventListeners() {
+    // (需要从 ui.js 获取 DOM 元素引用)
+    const mistralTextArea = document.getElementById('mistralApiKeys');
+    const translationTextArea = document.getElementById('translationApiKeys');
+    const rememberMistralCheckbox = document.getElementById('rememberMistralKey');
+    const rememberTranslationCheckbox = document.getElementById('rememberTranslationKey');
+    const translationModelSelect = document.getElementById('translationModel');
+    const advancedSettingsToggle = document.getElementById('advancedSettingsToggle');
+    const maxTokensSlider = document.getElementById('maxTokensPerChunk');
+    const skipFilesCheckbox = document.getElementById('skipProcessedFiles');
+    const concurrencyInput = document.getElementById('concurrencyLevel');
+    const translationConcurrencyInput = document.getElementById('translationConcurrencyLevel'); // Get ref to new input
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('pdfFileInput');
+    const browseBtn = document.getElementById('browseFilesBtn');
+    const clearBtn = document.getElementById('clearFilesBtn');
+    const processBtn = document.getElementById('processBtn');
+    const downloadBtn = document.getElementById('downloadAllBtn');
+    const targetLanguageSelect = document.getElementById('targetLanguage'); // Get ref to target language select
+    const customTargetLanguageInput = document.getElementById('customTargetLanguageInput'); // Get ref to custom language input
+    const useCustomPromptsCheckbox = document.getElementById('useCustomPromptsCheckbox'); // Get ref to custom prompt checkbox
+    const defaultSystemPromptTextarea = document.getElementById('defaultSystemPrompt'); // Get ref to default system prompt textarea
+    const defaultUserPromptTemplateTextarea = document.getElementById('defaultUserPromptTemplate'); // Get ref to default user prompt template textarea
+    const customModelInputs = [
+        document.getElementById('customApiEndpoint'),
+        document.getElementById('customModelId'),
+        document.getElementById('customRequestFormat'),
+        document.getElementById('customTemperature'),
+        document.getElementById('customMaxTokens')
+    ];
+
+    // API Key 存储
+    rememberMistralCheckbox.addEventListener('change', () => {
+        updateApiKeyStorage('mistralApiKeys', mistralTextArea.value, rememberMistralCheckbox.checked);
+    });
+    rememberTranslationCheckbox.addEventListener('change', () => {
+        updateApiKeyStorage('translationApiKeys', translationTextArea.value, rememberTranslationCheckbox.checked);
+    });
+    mistralTextArea.addEventListener('input', () => {
+        if (rememberMistralCheckbox.checked) {
+            localStorage.setItem('mistralApiKeys', mistralTextArea.value); // 直接保存
+        }
+        updateProcessButtonState(pdfFiles, isProcessing);
+    });
+    translationTextArea.addEventListener('input', () => {
+        if (rememberTranslationCheckbox.checked) {
+            localStorage.setItem('translationApiKeys', translationTextArea.value); // 直接保存
+        }
+        updateTranslationUIVisibility(isProcessing);
+    });
+
+    // 翻译模型和自定义设置
+    translationModelSelect.addEventListener('change', () => {
+        updateTranslationUIVisibility(isProcessing);
+        saveCurrentSettings(); // 保存包括模型选择在内的所有设置
+    });
+    customModelInputs.forEach(input => {
+        if (!input) return;
+        input.addEventListener('change', saveCurrentSettings);
+        input.addEventListener('input', saveCurrentSettings); // 实时保存
+    });
+
+    // 高级设置
+    advancedSettingsToggle.addEventListener('click', () => {
+        const settingsDiv = document.getElementById('advancedSettings');
+        const icon = document.getElementById('advancedSettingsIcon');
+        settingsDiv.classList.toggle('hidden');
+        icon.setAttribute('icon', settingsDiv.classList.contains('hidden') ? 'carbon:chevron-down' : 'carbon:chevron-up');
+        // 不需要单独保存，由内部控件处理
+    });
+    maxTokensSlider.addEventListener('input', () => {
+        document.getElementById('maxTokensPerChunkValue').textContent = maxTokensSlider.value;
+        saveCurrentSettings();
+    });
+    skipFilesCheckbox.addEventListener('change', saveCurrentSettings);
+    concurrencyInput.addEventListener('input', () => {
+        // 输入验证
+        let value = parseInt(concurrencyInput.value);
+        if (isNaN(value) || value < 1) value = 1;
+        if (value > 10) value = 10; // Keep limit for file processing
+        concurrencyInput.value = value;
+        saveCurrentSettings();
+    });
+    translationConcurrencyInput.addEventListener('input', () => { // Add listener for new input
+        // 输入验证
+        let value = parseInt(translationConcurrencyInput.value);
+        if (isNaN(value) || value < 1) value = 1;
+        if (value > 150) value = 150; // Increase limit for translation concurrency
+        translationConcurrencyInput.value = value;
+        saveCurrentSettings();
+    });
+
+    // 文件上传
+    dropZone.addEventListener('dragover', handleDragOver);
+    dropZone.addEventListener('dragleave', handleDragLeave);
+    dropZone.addEventListener('drop', handleDrop);
+    browseBtn.addEventListener('click', () => { if (!isProcessing) fileInput.click(); });
+    fileInput.addEventListener('change', handleFileSelect);
+    clearBtn.addEventListener('click', handleClearFiles);
+
+    // 目标语言选择
+    targetLanguageSelect.addEventListener('change', () => {
+        updateCustomLanguageInputVisibility(); // Update visibility based on selection
+        saveCurrentSettings(); // Save the new selection
+        updatePromptTextareasContent(); // Update prompt textareas based on new language
+    });
+    customTargetLanguageInput.addEventListener('input', saveCurrentSettings); // Save custom language name changes
+
+    // 默认提示编辑
+    useCustomPromptsCheckbox.addEventListener('change', () => {
+        updatePromptTextareasContent(); // Update enable/disable and content
+        saveCurrentSettings(); // Save the new checkbox state
+    });
+    defaultSystemPromptTextarea.addEventListener('input', saveCurrentSettings);
+    defaultUserPromptTemplateTextarea.addEventListener('input', saveCurrentSettings);
+
+    // 处理和下载
+    processBtn.addEventListener('click', handleProcessClick);
+    downloadBtn.addEventListener('click', handleDownloadClick);
+}
+
+// =====================
+// 事件处理函数
+// =====================
+
+function handleDragOver(e) {
+    e.preventDefault();
+    if (!isProcessing) {
+        e.currentTarget.classList.add('border-blue-500', 'bg-blue-50');
+    }
+}
+
+function handleDragLeave(e) {
+    e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    if (isProcessing) return;
+    e.currentTarget.classList.remove('border-blue-500', 'bg-blue-50');
+    addFilesToList(e.dataTransfer.files);
+}
+
+function handleFileSelect(e) {
+    if (isProcessing) return;
+    addFilesToList(e.target.files);
+    e.target.value = null; // 允许重新选择相同文件
+}
+
+function handleClearFiles() {
+    if (isProcessing) return;
+    pdfFiles = [];
+    allResults = []; // 清空结果
+    updateFileListUI(pdfFiles, isProcessing, handleRemoveFile);
+    updateProcessButtonState(pdfFiles, isProcessing);
+}
+
+function handleRemoveFile(indexToRemove) {
+    pdfFiles.splice(indexToRemove, 1);
+    // 如果需要，也可以从 allResults 中移除对应的占位符
+    updateFileListUI(pdfFiles, isProcessing, handleRemoveFile);
+    updateProcessButtonState(pdfFiles, isProcessing);
+}
+
+function addFilesToList(selectedFiles) {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+    let filesAdded = false;
     for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
         if (file.type === 'application/pdf') {
-            // Avoid adding duplicates based on name and size
             if (!pdfFiles.some(existingFile => existingFile.name === file.name && existingFile.size === file.size)) {
                 pdfFiles.push(file);
-                newlyAddedFiles.push(file);
+                filesAdded = true;
             } else {
                 showNotification(`文件 "${file.name}" 已在列表中`, 'info');
             }
@@ -450,1146 +324,330 @@ function handleFileSelection(selectedFiles) {
             showNotification(`文件 "${file.name}" 不是PDF，已忽略`, 'warning');
         }
     }
-
-    if (newlyAddedFiles.length > 0) {
-        updateFileListUI();
-        updateProcessButtonState();
+    if (filesAdded) {
+        updateFileListUI(pdfFiles, isProcessing, handleRemoveFile);
+        updateProcessButtonState(pdfFiles, isProcessing);
     }
 }
 
-// Update the UI list of selected files
-function updateFileListUI() {
-    fileList.innerHTML = ''; // Clear existing list
-    if (pdfFiles.length > 0) {
-        fileListContainer.classList.remove('hidden');
-        pdfFiles.forEach((file, index) => {
-            const listItem = document.createElement('div');
-            listItem.className = 'file-list-item';
-            listItem.innerHTML = `
-                <div class="flex items-center overflow-hidden mr-2">
-                    <iconify-icon icon="carbon:document-pdf" class="text-red-500 mr-2 flex-shrink-0" width="20"></iconify-icon>
-                    <span class="text-sm text-gray-800 truncate" title="${file.name}">${file.name}</span>
-                    <span class="text-xs text-gray-500 ml-2 flex-shrink-0">(${formatFileSize(file.size)})</span>
-                </div>
-                <button data-index="${index}" class="remove-file-btn text-gray-400 hover:text-red-600 flex-shrink-0">
-                    <iconify-icon icon="carbon:close" width="16"></iconify-icon>
-                </button>
-            `;
-            fileList.appendChild(listItem);
-        });
-
-        // Add event listeners to new remove buttons
-        document.querySelectorAll('.remove-file-btn').forEach(button => {
-            button.addEventListener('click', (e) => {
-                if (isProcessing) return; // Prevent removal during processing
-                const indexToRemove = parseInt(e.currentTarget.getAttribute('data-index'));
-                pdfFiles.splice(indexToRemove, 1);
-                updateFileListUI(); // Re-render the list
-                updateProcessButtonState();
-            });
-        });
+// 根据目标语言下拉菜单更新自定义语言输入框的可见性
+function updateCustomLanguageInputVisibility() {
+    const targetLangValue = document.getElementById('targetLanguage').value;
+    const customInputContainer = document.getElementById('customTargetLanguageContainer');
+    if (targetLangValue === 'custom') {
+        customInputContainer.classList.remove('hidden');
     } else {
-        fileListContainer.classList.add('hidden');
+        customInputContainer.classList.add('hidden');
     }
 }
 
-function updateProcessButtonState() {
-    // Check if there are any valid keys entered in the mistral textarea
-    const mistralKeys = mistralApiKeysTextarea.value
-        .split('\n')
-        .map(k => k.trim())
-        .filter(k => k !== '');
-    processBtn.disabled = pdfFiles.length === 0 || mistralKeys.length === 0 || isProcessing;
-}
-
-function updateTranslationUIVisibility() {
-    const translationModelValue = translationModelSelect.value;
-    const translationApiKeyDiv = translationApiKeysTextarea.closest('div').parentNode; // Find the parent div containing label and input
-    const translationKeys = translationApiKeysTextarea.value
-        .split('\n')
-        .map(k => k.trim())
-        .filter(k => k !== '');
-
-    if (translationModelValue !== 'none') {
-        translationApiKeyDiv.style.display = 'block';
-        // Optionally, add visual indication if keys are missing but translation is selected
-        if (translationKeys.length === 0 && !isProcessing) {
-             // Example: Add a red border or warning icon - check if translationApiKeyDiv exists
-             if (translationApiKeyDiv) {
-                  const textarea = translationApiKeyDiv.querySelector('textarea');
-                  if (textarea) {
-                      textarea.classList.add('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
-                  }
-             }
-        } else {
-             // Remove warning style if keys are present
-             if (translationApiKeyDiv) {
-                 const textarea = translationApiKeyDiv.querySelector('textarea');
-                 if (textarea) {
-                     textarea.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
-                 }
-             }
-        }
-    } else {
-        translationApiKeyDiv.style.display = 'none';
-        // Remove warning style if translation is not needed
-        if (translationApiKeyDiv) {
-             const textarea = translationApiKeyDiv.querySelector('textarea');
-             if (textarea) {
-                 textarea.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
-             }
-         }
-    }
-    // Handle custom model section visibility separately
-    if (translationModelValue === 'custom') {
-        customModelSettingsContainer.classList.remove('hidden');
-        customModelSettings.classList.remove('hidden');
-    } else {
-        customModelSettingsContainer.classList.add('hidden');
-        customModelSettings.classList.add('hidden');
-    }
-}
-
-// Updated to show batch summary
-function showResultsSection(successCount, skippedCount, errorCount) {
-    progressSection.classList.add('hidden');
-    resultsSection.classList.remove('hidden');
-    concurrentProgressText.textContent = ''; // Clear concurrent progress text
-
-    const totalAttempted = successCount + skippedCount + errorCount;
-    resultsSummary.innerHTML = `
-        <p><strong>处理总结:</strong></p>
-        <ul class="list-disc list-inside ml-4">
-            <li>成功处理: ${successCount} 文件</li>
-            <li>跳过 (已处理): ${skippedCount} 文件</li>
-            <li>处理失败 (含重试): ${errorCount} 文件</li>
-        </ul>
-        <p class="mt-2">在 ${pdfFiles.length} 个选定文件中，尝试处理了 ${totalAttempted} 个。</p>
-    `;
-
-    // Enable or disable download button based on success count
-    downloadAllBtn.disabled = successCount === 0;
-
-    window.scrollTo({
-        top: resultsSection.offsetTop - 20,
-        behavior: 'smooth'
-    });
-}
-
-// Updated to reset batch progress text and concurrent text
-function showProgressSection() {
-    resultsSection.classList.add('hidden');
-    progressSection.classList.remove('hidden');
-    progressLog.innerHTML = '';
-    batchProgressText.textContent = ''; // Reset batch progress text
-    concurrentProgressText.textContent = ''; // Reset concurrent progress text
-    updateProgress('初始化...', 0);
-
-    window.scrollTo({
-        top: progressSection.offsetTop - 20,
-        behavior: 'smooth'
-    });
-}
-
-// New function to update concurrent progress text
-function updateConcurrentProgress(count) {
-     concurrentProgressText.textContent = `当前并发任务数: ${count}`;
-}
-
-// New function to update overall batch progress based on completed tasks
-function updateOverallProgress(success, skipped, errors, totalFiles) {
-    const completedCount = success + skipped + errors;
-    if (totalFiles > 0) {
-        const percentage = totalFiles > 0 ? Math.round((completedCount / totalFiles) * 100) : 0;
-        batchProgressText.textContent = `整体进度: ${completedCount} / ${totalFiles} 完成`;
-        progressPercentage.textContent = `${percentage}%`;
-        progressBar.style.width = `${percentage}%`;
-    } else {
-        batchProgressText.textContent = '';
-        progressPercentage.textContent = `0%`;
-        progressBar.style.width = `0%`;
-    }
-}
-
-// Update progress (Now primarily for step text)
-function updateProgress(stepText, percentage) {
-    progressStep.textContent = stepText;
-    // Individual percentage is less relevant for the main bar now
-    // progressPercentage.textContent = `${percentage}%`;
-    // progressBar.style.width = `${percentage}%`;
-}
-
-function addProgressLog(text) {
-    const logElement = progressLog;
-    const timestamp = new Date().toLocaleTimeString();
-    const logLine = document.createElement('div');
-    // Basic escaping to prevent accidental HTML injection from file names
-    logLine.textContent = `[${timestamp}] ${text}`;
-    logElement.appendChild(logLine);
-    logElement.scrollTop = logElement.scrollHeight; // Auto-scroll
-}
-
-// Modified notification to handle potentially long messages better
-function showNotification(message, type = 'info', duration = 5000) {
-    const container = document.getElementById('notification-container');
-    const notification = document.createElement('div');
-    notification.className = 'pointer-events-auto w-full max-w-sm overflow-hidden rounded-lg bg-white shadow-lg ring-1 ring-black ring-opacity-5 mb-2 transition-all duration-300 ease-in-out transform translate-x-full opacity-0';
-
-    let iconName, iconColor, borderColor;
-    switch (type) {
-        case 'success':
-            iconName = 'carbon:checkmark-filled'; iconColor = 'text-green-500'; borderColor = 'border-green-500';
-            break;
-        case 'error':
-            iconName = 'carbon:error-filled'; iconColor = 'text-red-500'; borderColor = 'border-red-500';
-            break;
-        case 'warning':
-            iconName = 'carbon:warning-filled'; iconColor = 'text-yellow-500'; borderColor = 'border-yellow-500';
-            break;
-        default: // info
-            iconName = 'carbon:information-filled'; iconColor = 'text-blue-500'; borderColor = 'border-blue-500';
-            break;
-    }
-
-    notification.innerHTML = `
-        <div class="p-4 border-l-4 ${borderColor}">
-          <div class="flex items-start">
-            <div class="flex-shrink-0">
-              <iconify-icon icon="${iconName}" class="h-6 w-6 ${iconColor}" aria-hidden="true"></iconify-icon>
-            </div>
-            <div class="ml-3 w-0 flex-1 pt-0.5">
-              <p class="text-sm font-medium text-gray-900">通知</p>
-              <p class="mt-1 text-sm text-gray-500 break-words">${message}</p>
-            </div>
-            <div class="ml-4 flex flex-shrink-0">
-              <button type="button" class="inline-flex rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-                <span class="sr-only">关闭</span>
-                <iconify-icon icon="carbon:close" class="h-5 w-5" aria-hidden="true"></iconify-icon>
-        </button>
-            </div>
-          </div>
-        </div>
-    `;
-
-    container.appendChild(notification);
-
-    // Show animation
-    requestAnimationFrame(() => {
-        notification.classList.remove('translate-x-full', 'opacity-0');
-        notification.classList.add('translate-x-0', 'opacity-100');
-    });
-
-    const closeButton = notification.querySelector('button');
-    const closeFunc = () => closeNotification(notification);
-    closeButton.addEventListener('click', closeFunc);
-
-    // Auto close
-    const timeout = setTimeout(closeFunc, duration);
-    notification.dataset.timeout = timeout;
-
-    return notification;
-}
-
-// Close notification helper
-function closeNotification(notification) {
-    if (!notification || !notification.parentNode) return; // Already removed
-
-    clearTimeout(notification.dataset.timeout);
-    notification.classList.remove('translate-x-0', 'opacity-100');
-    notification.classList.add('translate-x-full', 'opacity-0');
-
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
-        }
-    }, 300); // Corresponds to transition duration
-}
-
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-// --- Process Single PDF Function --- (Now uses passed-in keys)
-async function processSinglePdf(fileToProcess, mistralKey, translationKey, translationModel) {
-    let currentMarkdownContent = '';
-    let currentTranslationContent = '';
-    let currentImagesData = [];
-    let fileId = null; // Keep track of the uploaded file ID
-    const logPrefix = `[${fileToProcess.name}]`; // Use a prefix for logs
-
-    try {
-        addProgressLog(`${logPrefix} 开始处理 (使用 Mistral Key: ...${mistralKey ? mistralKey.slice(-4) : 'N/A'})`);
-        // updateProgress(`${logPrefix} 准备上传...`, 10); // Individual file progress is less meaningful now
-
-        if (!mistralKey || mistralKey.length < 20) { // Basic sanity check
-            throw new Error('无效的 Mistral API Key 提供给处理函数');
-        }
-
-        const formData = new FormData();
-        formData.append('file', fileToProcess);
-        formData.append('purpose', 'ocr');
-
-        addProgressLog(`${logPrefix} 开始上传到 Mistral...`);
-        // updateProgress(`${logPrefix} 上传中...`, 20);
-
-        // 1. Upload File
-        let response = await fetch('https://api.mistral.ai/v1/files', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${mistralKey}` },
-            body: formData
-        });
-
-        if (!response.ok) {
-            const errorInfo = await getApiError(response, '文件上传失败');
-            addProgressLog(`${logPrefix} 上传失败: ${response.status} - ${errorInfo}`);
-            if (response.status === 401) throw new Error(`Mistral API Key (...${mistralKey.slice(-4)}) 无效或未授权`);
-            throw new Error(`文件上传失败 (${response.status}): ${errorInfo}`);
-        }
-
-        const fileData = await response.json();
-        if (!fileData || !fileData.id) throw new Error('上传成功但未返回有效的文件ID');
-        fileId = fileData.id; // Store the file ID
-        addProgressLog(`${logPrefix} 上传成功, File ID: ${fileId}`);
-        // updateProgress(`${logPrefix} 获取签名URL...`, 30);
-
-        // Small delay before getting URL
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // 2. Get Signed URL
-        const urlEndpoint = `https://api.mistral.ai/v1/files/${fileId}/url?expiry=24`;
-        response = await fetch(urlEndpoint, {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${mistralKey}`, 'Accept': 'application/json' }
-        });
-
-        if (!response.ok) {
-            const errorInfo = await getApiError(response, '获取签名URL失败');
-            addProgressLog(`${logPrefix} 获取签名URL失败: ${response.status} - ${errorInfo}`);
-            throw new Error(`获取签名URL失败 (${response.status}): ${errorInfo}`);
-        }
-
-        const urlData = await response.json();
-        if (!urlData || !urlData.url) throw new Error('获取的签名URL格式不正确');
-        const signedUrl = urlData.url;
-        addProgressLog(`${logPrefix} 成功获取文件访问URL`);
-        // updateProgress(`${logPrefix} OCR 处理中...`, 40);
-
-        // 3. Perform OCR
-        response = await fetch('https://api.mistral.ai/v1/ocr', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${mistralKey}`,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            body: JSON.stringify({
-                model: 'mistral-ocr-latest',
-                document: { type: "document_url", document_url: signedUrl },
-                include_image_base64: true
-            })
-        });
-
-        if (!response.ok) {
-            const errorInfo = await getApiError(response, 'OCR处理失败');
-            addProgressLog(`${logPrefix} OCR处理失败: ${response.status} - ${errorInfo}`);
-            throw new Error(`OCR处理失败 (${response.status}): ${errorInfo}`);
-        }
-
-        const ocrData = await response.json();
-        if (!ocrData || !ocrData.pages) throw new Error('OCR处理成功但返回的数据格式不正确');
-
-        addProgressLog(`${logPrefix} OCR 完成, 生成 Markdown...`);
-        // updateProgress(`${logPrefix} 生成 Markdown...`, 50);
-
-        // 4. Process OCR Results (extract markdown and images)
-        const processedOcr = processOcrResults(ocrData); // Now returns markdown and images
-        currentMarkdownContent = processedOcr.markdown;
-        currentImagesData = processedOcr.images;
-        addProgressLog(`${logPrefix} Markdown 生成完成`);
-        // updateProgress(`${logPrefix} Markdown 完成`, 60);
-
-        // 5. Translate if needed
-        if (translationModel !== 'none') {
-            if (!translationKey) {
-                // This check might be redundant if the main loop ensures a key is passed when needed,
-                // but good for robustness.
-                addProgressLog(`${logPrefix} 警告: 需要翻译但未提供有效的翻译 API Key。`);
-                // Optionally decide whether to proceed without translation or throw error
-                // For now, just log and skip translation
-            } else {
-                 addProgressLog(`${logPrefix} 开始翻译 (${translationModel}) (使用 Key: ...${translationKey.slice(-4)})`);
-                 // updateProgress(`${logPrefix} 翻译中...`, 70);
-
-                const estimatedTokens = estimateTokenCount(currentMarkdownContent);
-                const tokenLimit = parseInt(maxTokensPerChunk.value) || 2000;
-
-                if (estimatedTokens > tokenLimit * 1.2) { // Add a buffer before splitting
-                    addProgressLog(`${logPrefix} 文档较大 (~${Math.round(estimatedTokens/1000)}K tokens), 进行分段翻译`);
-                    currentTranslationContent = await translateLongDocument(
-                        currentMarkdownContent,
-                        targetLanguage.value,
-                        translationModel,
-                        translationKey, // Pass the specific key for this task
-                        logPrefix // Pass file context for logging
-                    );
-                } else {
-                    addProgressLog(`${logPrefix} 文档较小 (~${Math.round(estimatedTokens/1000)}K tokens), 直接翻译`);
-                    currentTranslationContent = await translateMarkdown(
-                        currentMarkdownContent,
-                        targetLanguage.value,
-                        translationModel,
-                        translationKey, // Pass the specific key for this task
-                        logPrefix // Pass file context for logging
-                    );
-                }
-                addProgressLog(`${logPrefix} 翻译完成`);
-                // updateProgress(`${logPrefix} 翻译完成`, 95);
-            }
-        } else {
-            addProgressLog(`${logPrefix} 不需要翻译`);
-        }
-
-        // updateProgress(`${logPrefix} 文件处理完成!`, 100);
-
-        // Return results for this file
-        return {
-            file: fileToProcess,
-            markdown: currentMarkdownContent,
-            translation: currentTranslationContent,
-            images: currentImagesData,
-            error: null
-        };
-
-    } catch (error) {
-        console.error(`处理文件 ${fileToProcess.name} 时出错:`, error);
-        addProgressLog(`${logPrefix} 错误: ${error.message}`);
-        // updateProgress(`${logPrefix} 处理失败`, 100); // Mark progress as failed for this file
-        // Return error information
-        return {
-            file: fileToProcess,
-            markdown: null,
-            translation: null,
-            images: [],
-            error: error.message
-        };
-    } finally {
-        // Clean up the uploaded file on Mistral, regardless of success or failure
-        if (fileId && mistralKey) { // Ensure we have a key to use for deletion
-            try {
-                await deleteMistralFile(fileId, mistralKey);
-                addProgressLog(`${logPrefix} 已清理 Mistral 上的临时文件 (ID: ${fileId})`);
-            } catch (deleteError) {
-                console.warn(`${logPrefix} 无法清理 Mistral 文件 ${fileId}:`, deleteError);
-                addProgressLog(`${logPrefix} 清理 Mistral 文件 ${fileId} 失败: ${deleteError.message}`);
-                // Don't throw an error here, just log the warning
-            }
-        }
-    }
-}
-
-// Helper to get error message from API response
-async function getApiError(response, defaultMessage) {
-    let errorInfo = defaultMessage;
-    try {
-        const responseText = await response.text();
-        console.error('API Error Response Text:', responseText); // Log raw response
-        try {
-            const jsonError = JSON.parse(responseText);
-            // Try common error message locations
-            errorInfo = jsonError.error?.message || jsonError.message || jsonError.detail || JSON.stringify(jsonError);
-        } catch (e) {
-            errorInfo = responseText || `HTTP ${response.status} ${response.statusText}`;
-        }
-    } catch (e) {
-        errorInfo = `${defaultMessage} (HTTP ${response.status} ${response.statusText})`;
-    }
-    // Limit length of error message
-    return errorInfo.substring(0, 300) + (errorInfo.length > 300 ? '...' : '');
-}
-
-// Helper to delete a file from Mistral
-async function deleteMistralFile(fileId, apiKey) {
-    const deleteUrl = `https://api.mistral.ai/v1/files/${fileId}`;
-    const response = await fetch(deleteUrl, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
-    if (!response.ok) {
-        const errorInfo = await getApiError(response, '文件删除失败');
-        // Don't throw here, let the caller decide
-        console.warn(`Failed to delete file ${fileId}: ${response.status} - ${errorInfo}`);
-        // Optionally return the error or just let it log
-    }
-    // Optionally check response.json() for { "id": "...", "object": "file.deleted", "deleted": true }
-}
-
-// Process OCR results - Now returns markdown and images
-function processOcrResults(ocrResponse) {
-    let markdownContent = '';
-    let imagesData = []; // Store { id: string, data: string (base64) }
-
-    try {
-        for (const page of ocrResponse.pages) {
-            const pageImages = {}; // Map image ID to its path within the eventual ZIP
-
-            if (page.images && Array.isArray(page.images)) {
-                for (const img of page.images) {
-                    if (img.id && img.image_base64) {
-                        const imgId = img.id;
-                        const imgData = img.image_base64; // This is just the base64 part
-                        imagesData.push({ id: imgId, data: imgData });
-                        // Path used in markdown, relative to the markdown file inside the zip
-                        pageImages[imgId] = `images/${imgId}.png`;
-                    }
-                }
-            }
-
-            let pageMarkdown = page.markdown || '';
-
-            // Replace local image references in markdown with the relative path
-            for (const [imgName, imgPath] of Object.entries(pageImages)) {
-                // Regex needs to handle potential markdown image syntax variations
-                // Matches ![alt_text](image_id) or ![image_id](image_id)
-                const imgRegex = new RegExp(`!\\[([^\\]]*?)\\]\\(${imgName}\\)`, 'g');
-                pageMarkdown = pageMarkdown.replace(imgRegex, (match, altText) => {
-                    // Keep original alt text if present, otherwise use image id
-                    const finalAltText = altText || imgName;
-                    return `![${finalAltText}](${imgPath})`;
-                });
-            }
-
-            markdownContent += pageMarkdown + '\n\n';
-        }
-
-        return { markdown: markdownContent.trim(), images: imagesData };
-    } catch (error) {
-        console.error('处理OCR结果时出错:', error);
-        // Return empty results on error to avoid breaking the entire batch
-        return { markdown: '', images: [] };
-    }
-}
-
-// Translate Markdown - Added context and uses passed-in apiKey
-async function translateMarkdown(markdownText, targetLang, model, apiKey, logContext = "") {
-    try {
-        const content = markdownText;
-        const lang = targetLang;
-        const selectedModel = model;
-        const key = apiKey; // Use the passed-in key
-
-        if (!content) throw new Error('没有要翻译的内容');
-        if (!key) {
-            // This might happen if getTranslationKey returned null
-            addProgressLog(`${logContext} 警告: 尝试翻译但没有有效的 API Key。`);
-            return `> [翻译跳过：缺少 API Key]\n\n${content}`;
-        }
-        if (selectedModel === 'none') return content; // No translation needed
-
-        const actualLang = lang === 'chinese' ? 'zh' : lang;
-        const sourceLang = actualLang === 'zh' ? '英文' : '中文';
-        const targetLangName = actualLang === 'zh' ? '中文' : '英文';
-
-        const translationPromptTemplate = `Please translate the following ${sourceLang} text into ${targetLangName}. Follow these instructions precisely:
-1.  **Preserve Markdown:** Maintain all original Markdown syntax elements (e.g., #, *, **, [], (), ![](), \`\`, $$...$$). Do not alter the structure.
-2.  **Accurate Terminology:** Translate technical and academic terms accurately. If a standard translation is unavailable or ambiguous, you may keep the original term in parentheses after the translation.
-3.  **Paragraph Structure:** Keep the original paragraph breaks and formatting.
-4.  **Content Only:** Output only the translated text. Do not add any introductory phrases, concluding remarks, or explanations about the translation process itself.
-5.  **Code Blocks:** Preserve code blocks (\`\`\`...\`\`\`) exactly as they are, without translating their content.
-6.  **Inline Code:** Preserve inline code (\`...\`) exactly as it is.
-7.  **Math Formulas:** Preserve LaTeX math formulas within $$...$$ or $...$ delimiters exactly as they are.
-8.  **Image Links:** Preserve Markdown image links like ![alt text](path/to/image.png) exactly. Do not translate alt text or paths.
-9.  **HTML Tags:** Preserve any HTML tags present in the text.
-
-Translate the following document content:
-
-${content}`;
-
-        const temperature = 0.5;
-        const maxTokens = 100000; // Note: Actual limit depends on the model
-        const sys_prompt = `You are a professional document translator specializing in ${sourceLang} to ${targetLangName} translation. Your primary goal is to provide an accurate translation while strictly preserving the original Markdown formatting, code blocks, math formulas, and image links.`;
-
-        const apiConfigs = {
-            'deepseek': {
-                endpoint: 'https://api.deepseek.com/v1/chat/completions',
-                modelName: 'DeepSeek v3',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-                bodyBuilder: () => ({
-                    model: "deepseek-chat", // Use the chat model ID
-                    messages: [{ role: "system", content: sys_prompt }, { role: "user", content: translationPromptTemplate }],
-                    temperature: temperature, max_tokens: 8000 // Adjusted max_tokens
-                }),
-                responseExtractor: (data) => data?.choices?.[0]?.message?.content
-            },
-            'gemini': {
-                // Correct endpoint for v1beta (Flash model often here)
-                endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${key}`,
-                modelName: 'Google Gemini 1.5 Flash',
-                headers: { 'Content-Type': 'application/json' },
-                bodyBuilder: () => ({
-                    contents: [{ role: "user", parts: [{ text: translationPromptTemplate }] }],
-                    generationConfig: { temperature: temperature, maxOutputTokens: 8192 } // Gemini uses maxOutputTokens
-                }),
-                responseExtractor: (data) => data?.candidates?.[0]?.content?.parts?.[0]?.text
-            },
-            'claude': {
-                endpoint: 'https://api.anthropic.com/v1/messages',
-                modelName: 'Claude 3.5 Sonnet',
-                headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-                bodyBuilder: () => ({
-                    // Claude 3.5 Sonnet ID confirmed
-                    model: "claude-3-5-sonnet-20240620",
-                    system: sys_prompt, // Claude uses 'system' parameter
-                    messages: [{ role: "user", content: translationPromptTemplate }],
-                    temperature: temperature, max_tokens: 8000 // Adjusted max_tokens for Claude 3.5 Sonnet
-                }),
-                responseExtractor: (data) => data?.content?.[0]?.text
-            },
-            'mistral': {
-                endpoint: 'https://api.mistral.ai/v1/chat/completions',
-                modelName: 'Mistral Large',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-                bodyBuilder: () => ({
-                    // Use the latest recommended model
-                    model: "mistral-large-latest",
-                    messages: [{ role: "system", content: sys_prompt }, { role: "user", content: translationPromptTemplate }],
-                    temperature: temperature, max_tokens: 8000 // Adjusted max_tokens
-                }),
-                responseExtractor: (data) => data?.choices?.[0]?.message?.content
-            },
-            'tongyi-deepseek-v3': {
-                endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-                modelName: '阿里云通义 DeepSeek v3',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-                bodyBuilder: () => ({
-                    model: "deepseek-v3",
-                    messages: [{ role: "system", content: sys_prompt }, { role: "user", content: translationPromptTemplate }],
-                    temperature: temperature, max_tokens: 8000
-                }),
-                responseExtractor: (data) => data?.choices?.[0]?.message?.content
-            },
-            'volcano-deepseek-v3': {
-                // Endpoint needs verification for DeepSeek v3 on Volcano
-                endpoint: 'https://api.volcengine.com/ml/api/v1/open/llm/inference',
-                modelName: '火山引擎 DeepSeek v3',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-                bodyBuilder: () => ({
-                    // Model ID might differ on Volcano, needs confirmation
-                    model: { name: "deepseek-v3" }, // Example structure, check Volcano docs
-                    messages: [{ role: "system", content: sys_prompt }, { role: "user", content: translationPromptTemplate }],
-                    parameters: { temperature: temperature, max_tokens: 8000 }
-                }),
-                responseExtractor: (data) => data?.choices?.[0]?.message?.content // Check response structure
-            },
-            'custom': {
-                createConfig: () => {
-                    const customModelName = document.getElementById('customModelName').value.trim();
-                    const customApiEndpoint = document.getElementById('customApiEndpoint').value.trim();
-                    const customModelId = document.getElementById('customModelId').value.trim();
-                    const customRequestFormat = document.getElementById('customRequestFormat').value;
-
-                    if (!customModelName || !customApiEndpoint || !customModelId) {
-                        throw new Error('请填写完整的自定义模型信息');
-                    }
-
-                    const config = {
-                        endpoint: customApiEndpoint,
-                        modelName: customModelName,
-                        headers: { 'Content-Type': 'application/json' },
-                        bodyBuilder: null,
-                        responseExtractor: null
-                    };
-
-                    // Simplified Authorization/API Key header handling
-                    if (customApiEndpoint.includes('anthropic')) {
-                        config.headers['x-api-key'] = key;
-                        config.headers['anthropic-version'] = '2023-06-01'; // Or latest if needed
-                    } else if (customApiEndpoint.includes('google')) {
-                        // Gemini typically uses key in URL, but some proxy might need header
-                        // config.headers['Authorization'] = `Bearer ${key}`; // Or other header if needed
-                    } else { // Assume Bearer token for others (OpenAI, Mistral, etc.)
-                        config.headers['Authorization'] = `Bearer ${key}`;
-                    }
-
-                    switch (customRequestFormat) {
-                        case 'openai':
-                            config.bodyBuilder = () => ({
-                                model: customModelId,
-                                messages: [{ role: "system", content: sys_prompt }, { role: "user", content: translationPromptTemplate }],
-                                temperature: temperature, max_tokens: 8000
-                            });
-                            config.responseExtractor = (data) => data?.choices?.[0]?.message?.content;
-                            break;
-                        case 'anthropic':
-                            config.bodyBuilder = () => ({
-                                model: customModelId,
-                                system: sys_prompt,
-                                messages: [{ role: "user", content: translationPromptTemplate }],
-                                temperature: temperature, max_tokens: 8000
-                            });
-                            config.responseExtractor = (data) => data?.content?.[0]?.text;
-                            break;
-                        case 'gemini':
-                            config.bodyBuilder = () => ({
-                                contents: [{ role: "user", parts: [{ text: translationPromptTemplate }] }],
-                                generationConfig: { temperature: temperature, maxOutputTokens: 8192 }
-                            });
-                            config.responseExtractor = (data) => data?.candidates?.[0]?.content?.parts?.[0]?.text;
-                            break;
-                        default:
-                            throw new Error(`不支持的自定义请求格式: ${customRequestFormat}`);
-                    }
-                    return config;
-                }
-            }
-        };
-
-        const apiConfig = apiConfigs[selectedModel];
-        if (!apiConfig) throw new Error(`不支持的翻译模型: ${selectedModel}`);
-
-        let effectiveConfig;
-        let modelDisplayName;
-        if (selectedModel === 'custom') {
-            effectiveConfig = apiConfig.createConfig();
-            modelDisplayName = effectiveConfig.modelName;
-        } else {
-            effectiveConfig = apiConfig;
-            modelDisplayName = apiConfig.modelName;
-        }
-
-        addProgressLog(`${logContext} 调用 ${modelDisplayName} 翻译 API (Key: ...${key.slice(-4)})...`);
-        console.log(`${logContext} Calling translation API: ${modelDisplayName} at ${effectiveConfig.endpoint}`);
-
-        const response = await fetch(effectiveConfig.endpoint, {
-            method: 'POST',
-            headers: effectiveConfig.headers,
-            body: JSON.stringify(effectiveConfig.bodyBuilder())
-        });
-
-        if (!response.ok) {
-            const errorText = await getApiError(response, '翻译API返回错误');
-            console.error(`${logContext} API Error (${response.status}): ${errorText}`);
-            throw new Error(`翻译 API 返回错误 (${response.status}) (Key: ...${key.slice(-4)})`); // Simplified error for user
-        }
-
-        const data = await response.json();
-        // console.log(`${logContext} Translation API Response Data:`, data); // Log raw response data for debugging
-
-        const translatedContent = effectiveConfig.responseExtractor(data);
-
-        if (translatedContent === null || translatedContent === undefined) {
-            console.error(`${logContext} Failed to extract translation from response:`, data);
-            throw new Error('无法从 API 响应中提取翻译内容');
-        }
-
-        addProgressLog(`${logContext} ${modelDisplayName} API 调用成功`);
-        return translatedContent.trim(); // Trim whitespace
-
-    } catch (error) {
-        console.error(`${logContext} 翻译错误:`, error);
-        addProgressLog(`${logContext} 错误: 调用 ${model || 'custom'} 翻译 API 失败 - ${error.message}`);
-        throw new Error(`调用翻译 API 失败: ${error.message}`); // Re-throw to be caught by the main loop
-    }
-}
-
-// Long document translation - Added context and uses passed-in apiKey
-async function translateLongDocument(markdownText, targetLang, model, apiKey, logContext = "") {
-    // Use the refined splitting function
-    const parts = splitMarkdownIntoChunks(markdownText, logContext);
-    console.log(`${logContext} 文档分割为 ${parts.length} 部分进行翻译`);
-    addProgressLog(`${logContext} 文档被分割为 ${parts.length} 部分进行翻译`);
-
-    let translatedChunks = [];
-    let hasErrors = false;
-
-    for (let i = 0; i < parts.length; i++) {
-        const currentPart = parts[i];
-        // Estimate progress more granularly within the translation step (e.g., 70% to 95%)
-        // const baseProgress = 70;
-        // const progressRange = 25;
-        // const partProgress = baseProgress + Math.floor(((i + 1) / parts.length) * progressRange);
-        // updateProgress(`翻译中 (部分 ${i + 1}/${parts.length})...`, partProgress);
-        addProgressLog(`${logContext} 正在翻译第 ${i + 1}/${parts.length} 部分...`);
-
-        try {
-            // Add context and pass the key to the recursive call
-            const partResult = await translateMarkdown(currentPart, targetLang, model, apiKey, `${logContext} (Part ${i+1}/${parts.length})`);
-            translatedChunks.push(partResult);
-
-            // Optional delay between parts
-            if (i < parts.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 500)); // 0.5s delay
-            }
-        } catch (error) {
-            console.error(`${logContext} 第 ${i + 1} 部分翻译失败:`, error);
-            addProgressLog(`${logContext} 警告: 第 ${i + 1} 部分翻译失败: ${error.message}. 将保留原文.`);
-            // Keep the original part on error
-            translatedChunks.push(`\n\n> **[翻译错误 - 保留原文 Part ${i+1}]**\n\n${currentPart}\n\n`);
-            hasErrors = true;
-        }
-    }
-
-    if (hasErrors) {
-        addProgressLog(`${logContext} 翻译完成，但部分内容未能成功翻译。`);
-    } else {
-        addProgressLog(`${logContext} 所有部分翻译完成。`);
-    }
-
-    // Merge chunks preserving double newlines which often indicate paragraph breaks
-    return translatedChunks.join('\n\n');
-}
-
-// --- Markdown Splitting --- (No changes needed here likely)
-// Updated Markdown Splitting Logic
-// Main function to split markdown
-function splitMarkdownIntoChunks(markdown, logContext = "") {
-    const tokenLimit = parseInt(maxTokensPerChunk.value) || 2000;
-    const estimatedTokens = estimateTokenCount(markdown);
-    addProgressLog(`${logContext} 估算总 token 数: ~${estimatedTokens}, 分段限制: ${tokenLimit}`);
-
-    if (estimatedTokens <= tokenLimit * 1.1) { // Allow slight overshoot to avoid unnecessary splits
-        addProgressLog(`${logContext} 文档未超过大小限制，不进行分割。`);
-        return [markdown];
-    }
-
-    addProgressLog(`${logContext} 文档超过大小限制，开始分割...`);
-    const lines = markdown.split('\n');
-    const chunks = [];
-    let currentChunkLines = [];
-    let currentTokenCount = 0;
-    let inCodeBlock = false;
-    const headingRegex = /^(#+)\s+.*/; // Matches any level heading
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const lineTokens = estimateTokenCount(line);
-
-        // Track code blocks
-        if (line.trim().startsWith('```')) {
-            inCodeBlock = !inCodeBlock;
-        }
-
-        let shouldSplit = false;
-
-        // Conditions to split *before* adding the current line:
-        if (currentChunkLines.length > 0) {
-            // 1. If adding the line exceeds the limit
-            if (currentTokenCount + lineTokens > tokenLimit) {
-                // Only split if the current chunk isn't tiny (prevents splitting very large single lines/blocks prematurely)
-                if (currentTokenCount > tokenLimit * 0.1) {
-                    shouldSplit = true;
-                    addProgressLog(`${logContext} 分割点: 超过 Token 限制 (${currentTokenCount} + ${lineTokens} > ${tokenLimit}) at line ${i+1}`);
-                }
-            }
-            // 2. If the current line is a major heading (H1/H2) and the chunk is reasonably large, split for logical structure
-            //    (and not inside a code block)
-            else if (!inCodeBlock && headingRegex.test(line)) {
-                const match = line.match(headingRegex);
-                if (match && match[1].length <= 2 && currentTokenCount > tokenLimit * 0.5) { // Split on H1/H2 if chunk is >50% full
-                    shouldSplit = true;
-                    addProgressLog(`${logContext} 分割点: 遇到 H${match[1].length} 标题 and chunk size > 50% (${currentTokenCount}) at line ${i+1}`);
-                }
-            }
-        }
-
-        if (shouldSplit) {
-            chunks.push(currentChunkLines.join('\n'));
-            currentChunkLines = [];
-            currentTokenCount = 0;
-        }
-
-        // Add the current line to the chunk
-        currentChunkLines.push(line);
-        currentTokenCount += lineTokens;
-    }
-
-    // Add the last remaining chunk
-    if (currentChunkLines.length > 0) {
-        chunks.push(currentChunkLines.join('\n'));
-    }
-
-    addProgressLog(`${logContext} 初始分割为 ${chunks.length} 个片段.`);
-
-    // Secondary pass: Check if any chunk is still too large (e.g., due to massive code block or image data)
-    // This is a simplified fallback; more sophisticated splitting might be needed for extreme cases.
-    const finalChunks = [];
-    for(let j = 0; j < chunks.length; j++) {
-        const chunk = chunks[j];
-        const chunkTokens = estimateTokenCount(chunk);
-        if (chunkTokens > tokenLimit * 1.1) { // Allow some leeway
-            addProgressLog(`${logContext} 警告: 第 ${j+1} 段 (${chunkTokens} tokens) 仍然超过限制 ${tokenLimit}. 可能导致翻译失败或截断.`);
-            // Attempt basic split by paragraphs as a fallback
-            const subChunks = splitByParagraphs(chunk, tokenLimit, logContext, j+1);
-            finalChunks.push(...subChunks);
-        } else {
-            finalChunks.push(chunk);
-        }
-    }
-
-    if (finalChunks.length !== chunks.length) {
-        addProgressLog(`${logContext} 二次分割后总片段数: ${finalChunks.length}`);
-    }
-
-    return finalChunks;
-}
-
-// Fallback: Split large chunks by paragraphs
-function splitByParagraphs(text, tokenLimit, logContext, chunkIndex) {
-    addProgressLog(`${logContext} 对第 ${chunkIndex} 段进行段落分割...`);
-    const paragraphs = text.split('\n\n');
-    const chunks = [];
-    let currentChunkLines = [];
-    let currentTokenCount = 0;
-
-    for (const paragraph of paragraphs) {
-        const paragraphTokens = estimateTokenCount(paragraph);
-
-        // If a single paragraph is itself too large, add it as its own chunk (further splitting needed)
-        if (paragraphTokens > tokenLimit * 1.1) {
-            addProgressLog(`${logContext} 警告: 第 ${chunkIndex} 段中的一个段落 (${paragraphTokens} tokens) 超过限制.`);
-            // Add previous chunk if exists
-            if (currentChunkLines.length > 0) {
-                chunks.push(currentChunkLines.join('\n\n'));
-            }
-            // Add the huge paragraph as its own chunk
-            chunks.push(paragraph);
-            currentChunkLines = [];
-            currentTokenCount = 0;
-            continue;
-        }
-
-        if (currentTokenCount + paragraphTokens > tokenLimit && currentChunkLines.length > 0) {
-            chunks.push(currentChunkLines.join('\n\n'));
-            currentChunkLines = [];
-            currentTokenCount = 0;
-        }
-
-        currentChunkLines.push(paragraph);
-        currentTokenCount += paragraphTokens;
-    }
-
-    if (currentChunkLines.length > 0) {
-        chunks.push(currentChunkLines.join('\n\n'));
-    }
-    addProgressLog(`${logContext} 第 ${chunkIndex} 段被分割为 ${chunks.length} 个子段落.`);
-    return chunks;
-}
-
-// Estimate token count (improved slightly)
-function estimateTokenCount(text) {
-    if (!text) return 0;
-    // Simple estimate: words + non-whitespace characters for punctuation/symbols
-    const words = text.match(/\b\w+\b/g)?.length || 0;
-    // Count non-space, non-alphanumeric characters as potential tokens (crude)
-    const symbols = text.replace(/\s+/g, '').replace(/\w/g, '').length;
-    // Chinese characters count roughly as 1 token each, adjust estimate
-    const chineseChars = text.match(/[\u4e00-\u9fff]/g)?.length || 0;
-
-    // Weighted estimate (very rough)
-    return Math.ceil(words * 1.2 + symbols * 0.8 + chineseChars * 1.1);
-}
-
-// --- Local Storage for Processed Files ---
-
-const PROCESSED_FILES_KEY = 'paperBurnerProcessedFiles';
-
-function loadProcessedFilesRecord() {
-    try {
-        const storedRecord = localStorage.getItem(PROCESSED_FILES_KEY);
-        if (storedRecord) {
-            processedFilesRecord = JSON.parse(storedRecord);
-            console.log("Loaded processed files record:", processedFilesRecord);
-        } else {
-            processedFilesRecord = {};
-        }
-    } catch (e) {
-        console.error("Failed to load processed files record from localStorage:", e);
-        processedFilesRecord = {}; // Reset on error
-    }
-}
-
-function saveProcessedFilesRecord() {
-    try {
-        localStorage.setItem(PROCESSED_FILES_KEY, JSON.stringify(processedFilesRecord));
-        console.log("Saved processed files record.");
-    } catch (e) {
-        console.error("Failed to save processed files record to localStorage:", e);
-        showNotification("无法保存已处理文件记录到浏览器缓存", "error");
-    }
-}
-
-function isAlreadyProcessed(fileIdentifier) {
-    return processedFilesRecord.hasOwnProperty(fileIdentifier) && processedFilesRecord[fileIdentifier] === true;
-}
-
-function markFileAsProcessed(fileIdentifier) {
-    processedFilesRecord[fileIdentifier] = true;
-    // Saving happens at the end of the batch process
-}
-
-// --- Download All Results ---
-
-async function downloadAllResults() {
-    // Filter results to only include successful ones before zipping
-    const successfulResults = allResults.filter(result => result && !result.error && result.markdown && !result.skipped);
-
-    if (successfulResults.length === 0) {
-        showNotification('没有成功的处理结果可供下载', 'warning');
-        return;
-    }
-
-    addProgressLog('开始打包下载结果...');
-    const zip = new JSZip();
-    let filesAdded = 0;
-
-    for (const result of successfulResults) { // Iterate over successful results only
-        const pdfName = result.file.name.replace(/\.pdf$/i, ''); // Remove .pdf extension
-        // Sanitize filename to avoid issues in zip files
-        const safeFolderName = pdfName.replace(/[/\\:*?"<>|]/g, '_').substring(0, 100);
-        const folder = zip.folder(safeFolderName); // Create a folder for each PDF
-
-        // 1. Add Markdown file
-        folder.file('document.md', result.markdown);
-
-        // 2. Add Translation file (if exists)
-        if (result.translation) {
-            const currentDate = new Date().toISOString().split('T')[0];
-            const headerDeclaration = `> *本文档由 Paper Burner 工具制作 (${currentDate})。内容由 AI 大模型翻译生成，不保证翻译内容的准确性和完整性。*\n\n`;
-            const footerDeclaration = `\n\n---\n> *免责声明：本文档内容由大模型API自动翻译生成，Paper Burner 工具不对翻译内容的准确性、完整性和合法性负责。*`;
-            const contentToDownload = headerDeclaration + result.translation + footerDeclaration;
-            folder.file('translation.md', contentToDownload);
-        }
-
-        // 3. Add Images (if any)
-        if (result.images && result.images.length > 0) {
-            const imagesFolder = folder.folder('images');
-            for (const img of result.images) {
-                try {
-                    // Ensure the data is just the base64 part
-                    const base64Data = img.data.includes(',') ? img.data.split(',')[1] : img.data;
-                    if (base64Data) {
-                        imagesFolder.file(`${img.id}.png`, base64Data, { base64: true });
-                    } else {
-                        console.warn(`Skipping image ${img.id} in ${safeFolderName} due to missing data.`);
-                    }
-                } catch (imgError) {
-                    console.error(`Error adding image ${img.id} to zip for ${safeFolderName}:`, imgError);
-                    addProgressLog(`警告: 打包图片 ${img.id} (文件: ${safeFolderName}) 时出错: ${imgError.message}`);
-                }
-            }
-        }
-        filesAdded++;
-    }
-
-    if (filesAdded === 0) { // Should not happen if successfulResults.length > 0, but good check
-        showNotification('没有成功处理的文件可以打包下载', 'warning');
-        addProgressLog('没有可打包的文件。');
-        return;
-    }
-
-    try {
-        addProgressLog(`正在生成包含 ${filesAdded} 个文件结果的 ZIP 包...`);
-        const zipBlob = await zip.generateAsync({
-            type: 'blob',
-            compression: "DEFLATE",
-            compressionOptions: {
-                level: 6 // Adjust compression level (1-9) as needed
-            }
-        }, (metadata) => {
-            // Optional: Update progress during zip generation
-            // updateProgress(`压缩中... ${metadata.percent.toFixed(0)}%`, 95 + (metadata.percent / 10));
-            // console.log(`Zipping progress: ${metadata.percent.toFixed(2)} %`);
-        });
-
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        saveAs(zipBlob, `PaperBurner_Results_${timestamp}.zip`);
-        addProgressLog('ZIP 文件生成完毕，开始下载。');
-    } catch (error) {
-        console.error('创建或下载 ZIP 文件失败:', error);
-        showNotification('创建 ZIP 文件失败: ' + error.message, 'error');
-        addProgressLog('错误: 创建 ZIP 文件失败 - ' + error.message);
-    }
-}
-
-// --- Settings Load/Save ---
-
-function saveSettings() {
-    const settings = {
-        maxTokensPerChunk: maxTokensPerChunk.value,
-        skipProcessedFiles: skipProcessedFilesCheckbox.checked,
-        selectedTranslationModel: translationModelSelect.value,
-        concurrencyLevel: concurrencyLevelInput.value // Save concurrency level
-    };
-
-    if (translationModelSelect.value === 'custom') {
-        settings.customModelSettings = {
-            modelName: document.getElementById('customModelName').value,
+// 保存当前所有设置的辅助函数
+function saveCurrentSettings() {
+    // 从 DOM 读取当前所有设置值
+    const targetLangValue = document.getElementById('targetLanguage').value;
+    const settingsData = {
+        maxTokensPerChunk: document.getElementById('maxTokensPerChunk').value,
+        skipProcessedFiles: document.getElementById('skipProcessedFiles').checked,
+        selectedTranslationModel: document.getElementById('translationModel').value,
+        concurrencyLevel: document.getElementById('concurrencyLevel').value,
+        translationConcurrencyLevel: document.getElementById('translationConcurrencyLevel').value, // Read new setting
+        targetLanguage: targetLangValue, // Save target language selection
+        customTargetLanguageName: targetLangValue === 'custom' ? document.getElementById('customTargetLanguageInput').value : '', // Save custom language name if applicable
+        customModelSettings: {
             apiEndpoint: document.getElementById('customApiEndpoint').value,
             modelId: document.getElementById('customModelId').value,
-            requestFormat: document.getElementById('customRequestFormat').value
-        };
-    }
-
-    try {
-        localStorage.setItem('paperBurnerSettings', JSON.stringify(settings));
-    } catch (e) {
-        console.error('保存设置失败:', e);
-        showNotification('无法保存设置到浏览器缓存', 'error');
-    }
+            requestFormat: document.getElementById('customRequestFormat').value,
+            temperature: parseFloat(document.getElementById('customTemperature').value),
+            max_tokens: parseInt(document.getElementById('customMaxTokens').value)
+        },
+        defaultSystemPrompt: document.getElementById('defaultSystemPrompt').value, // Save default system prompt
+        defaultUserPromptTemplate: document.getElementById('defaultUserPromptTemplate').value, // Save default user prompt template
+        useCustomPrompts: document.getElementById('useCustomPromptsCheckbox').checked // Save checkbox state
+    };
+    // 调用 storage.js 中的保存函数
+    saveSettings(settingsData);
 }
 
-function loadSettings() {
-    try {
-        const storedSettings = localStorage.getItem('paperBurnerSettings');
-        if (storedSettings) {
-            const settings = JSON.parse(storedSettings);
+// =====================
+// 核心处理流程启动
+// =====================
+async function handleProcessClick() {
+    if (isProcessing) return;
 
-            // Load advanced settings
-            if (settings.maxTokensPerChunk) {
-                maxTokensPerChunk.value = settings.maxTokensPerChunk;
-                maxTokensPerChunkValue.textContent = settings.maxTokensPerChunk;
-            }
-            if (settings.hasOwnProperty('skipProcessedFiles')) { // Check property existence
-                skipProcessedFilesCheckbox.checked = settings.skipProcessedFiles;
-            } else {
-                skipProcessedFilesCheckbox.checked = false; // Default to false if not found
-            }
-            if (settings.concurrencyLevel) { // Load concurrency level
-                concurrencyLevelInput.value = settings.concurrencyLevel;
-            } else {
-                concurrencyLevelInput.value = 1; // Default to 1 if not found
-            }
-
-            // Load selected translation model
-            if (settings.selectedTranslationModel) {
-                translationModelSelect.value = settings.selectedTranslationModel;
-            }
-
-            // Load custom model settings if applicable
-            if (settings.selectedTranslationModel === 'custom' && settings.customModelSettings) {
-                const cms = settings.customModelSettings;
-                document.getElementById('customModelName').value = cms.modelName || '';
-                document.getElementById('customApiEndpoint').value = cms.apiEndpoint || '';
-                document.getElementById('customModelId').value = cms.modelId || '';
-                document.getElementById('customRequestFormat').value = cms.requestFormat || 'openai';
-                // Ensure UI is visible
-                customModelSettingsContainer.classList.remove('hidden');
-                customModelSettings.classList.remove('hidden');
-            } else {
-                // Ensure UI is hidden if not custom
-                customModelSettingsContainer.classList.add('hidden');
-                customModelSettings.classList.add('hidden');
-            }
-            // Update UI elements based on loaded settings
-            updateTranslationUIVisibility();
+    // 1. 解析和验证 API Keys
+    if (!apiKeyManager.parseKeys('mistral')) {
+        showNotification('请输入至少一个有效的 Mistral API Key', 'error');
+        return;
+    }
+    const translationModel = document.getElementById('translationModel').value;
+    if (translationModel !== 'none' && !apiKeyManager.parseKeys('translation')) {
+        showNotification(`选择了翻译模型，请输入至少一个有效的翻译 API Key`, 'error');
+        return;
+    }
+    if (pdfFiles.length === 0) {
+        showNotification('请选择至少一个 PDF 文件', 'error');
+        return;
+    }
+    // 2. 验证自定义模型设置
+    if (translationModel === 'custom') {
+        const endpoint = document.getElementById('customApiEndpoint').value.trim();
+        const id = document.getElementById('customModelId').value.trim();
+        if (!endpoint || !id) {
+            showNotification('请填写完整的自定义模型 API Endpoint 和模型 ID', 'error');
+            return;
         }
-    } catch (e) {
-        console.error('加载设置失败:', e);
-        // Apply defaults or leave as is
-        skipProcessedFilesCheckbox.checked = false; // Default skip to false on load error
-        concurrencyLevelInput.value = 1; // Default concurrency to 1 on load error
+    }
+
+    // 3. 设置处理状态
+    isProcessing = true;
+    activeProcessingCount = 0;
+    retryAttempts.clear();
+    allResults = new Array(pdfFiles.length);
+    updateProcessButtonState(pdfFiles, isProcessing);
+    showProgressSection();
+    addProgressLog('=== 开始批量处理 ===');
+
+    // 4. 获取并发和重试设置
+    const concurrencyLevel = parseInt(document.getElementById('concurrencyLevel').value) || 1;
+    const translationConcurrencyLevel = parseInt(document.getElementById('translationConcurrencyLevel').value) || 2;
+    const skipEnabled = document.getElementById('skipProcessedFiles').checked;
+    const maxTokensValue = document.getElementById('maxTokensPerChunk').value;
+    const targetLanguageSetting = document.getElementById('targetLanguage').value;
+    const customTargetLanguageNameSetting = document.getElementById('customTargetLanguageInput').value;
+    const defaultSystemPromptSetting = document.getElementById('defaultSystemPrompt').value;
+    const defaultUserPromptTemplateSetting = document.getElementById('defaultUserPromptTemplate').value;
+    const useCustomPromptsSetting = document.getElementById('useCustomPromptsCheckbox').checked;
+
+    // 确定最终的目标语言名称
+    const effectiveTargetLanguage = targetLanguageSetting === 'custom'
+        ? customTargetLanguageNameSetting.trim() || 'English'
+        : targetLanguageSetting;
+
+    // 初始化翻译信号量
+    translationSemaphore.limit = translationConcurrencyLevel;
+    translationSemaphore.count = 0;
+    translationSemaphore.queue = [];
+
+    addProgressLog(`文件并发: ${concurrencyLevel}, 翻译并发: ${translationConcurrencyLevel}, 最大重试: ${MAX_RETRIES}, 跳过已处理: ${skipEnabled}`);
+    updateConcurrentProgress(0);
+
+    // 5. 初始化计数器和待处理队列
+    let successCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
+    const pendingIndices = new Set();
+    const filesToProcess = pdfFiles.slice();
+
+    for (let i = 0; i < filesToProcess.length; i++) {
+        const file = filesToProcess[i];
+        const fileIdentifier = `${file.name}_${file.size}`;
+        if (skipEnabled && isAlreadyProcessed(fileIdentifier, processedFilesRecord)) {
+            addProgressLog(`[${file.name}] 已处理过，跳过。`);
+            skippedCount++;
+            allResults[i] = { file: file, skipped: true };
+        } else {
+            pendingIndices.add(i);
+        }
+    }
+
+    // 6. 更新初始进度
+    updateOverallProgress(successCount, skippedCount, errorCount, filesToProcess.length);
+
+    // 7. 启动并发处理队列
+    const processQueue = async () => {
+        while (pendingIndices.size > 0 || activeProcessingCount > 0) {
+            while (pendingIndices.size > 0 && activeProcessingCount < concurrencyLevel) {
+                const currentFileIndex = pendingIndices.values().next().value;
+                pendingIndices.delete(currentFileIndex);
+
+                const currentFile = filesToProcess[currentFileIndex];
+                const fileIdentifier = `${currentFile.name}_${currentFile.size}`;
+                const currentRetry = retryAttempts.get(fileIdentifier) || 0;
+
+                activeProcessingCount++;
+                updateConcurrentProgress(activeProcessingCount);
+
+                const retryText = currentRetry > 0 ? ` (重试 ${currentRetry}/${MAX_RETRIES})` : '';
+                addProgressLog(`--- [${successCount + skippedCount + errorCount + 1}/${filesToProcess.length}] 开始处理: ${currentFile.name}${retryText} ---`);
+
+                // 获取当前任务的 key
+                const mistralKeyForTask = apiKeyManager.getMistralKey();
+                const translationKeyForTask = apiKeyManager.getTranslationKey();
+
+                // 调用核心处理函数
+                processSinglePdf(
+                    currentFile,
+                    mistralKeyForTask,
+                    translationKeyForTask,
+                    translationModel,
+                    maxTokensValue,
+                    effectiveTargetLanguage,
+                    acquireTranslationSlot,
+                    releaseTranslationSlot,
+                    defaultSystemPromptSetting,
+                    defaultUserPromptTemplateSetting,
+                    useCustomPromptsSetting
+                )
+                    .then(result => {
+                        if (result && !result.error) {
+                            allResults[currentFileIndex] = result;
+                            markFileAsProcessed(fileIdentifier, processedFilesRecord);
+                            addProgressLog(`[${currentFile.name}] 处理成功！`);
+                            successCount++;
+                            retryAttempts.delete(fileIdentifier);
+                        } else {
+                            // 处理失败和重试
+                            const errorMsg = result?.error || '未知错误';
+                            const nextRetryCount = (retryAttempts.get(fileIdentifier) || 0) + 1;
+
+                            if (nextRetryCount <= MAX_RETRIES) {
+                                retryAttempts.set(fileIdentifier, nextRetryCount);
+                                pendingIndices.add(currentFileIndex);
+                                addProgressLog(`[${currentFile.name}] 处理失败: ${errorMsg}. 稍后重试 (${nextRetryCount}/${MAX_RETRIES}).`);
+                            } else {
+                                addProgressLog(`[${currentFile.name}] 处理失败: ${errorMsg}. 已达最大重试次数.`);
+                                allResults[currentFileIndex] = result || { file: currentFile, error: errorMsg };
+                                errorCount++;
+                                retryAttempts.delete(fileIdentifier);
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        // 捕获 processSinglePdf 内部未预料的错误
+                        console.error(`处理文件 ${currentFile.name} 时发生意外错误:`, error);
+                        addProgressLog(`错误: 处理 ${currentFile.name} 失败 - ${error.message}`);
+                        allResults[currentFileIndex] = { file: currentFile, error: error.message };
+                        errorCount++;
+                        retryAttempts.delete(fileIdentifier);
+                    })
+                    .finally(() => {
+                        // 任务完成（成功、重试或最终失败）
+                        activeProcessingCount--;
+                        updateConcurrentProgress(activeProcessingCount);
+                        updateOverallProgress(successCount, skippedCount, errorCount, filesToProcess.length);
+                    });
+
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            if (pendingIndices.size > 0 || activeProcessingCount > 0) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+        }
+    };
+
+    // 8. 执行队列并处理最终结果
+    try {
+        await processQueue();
+    } catch (err) {
+        console.error("处理队列时发生严重错误:", err);
+        addProgressLog(`严重错误: 处理队列失败 - ${err.message}`);
+        const currentCompleted = successCount + skippedCount + errorCount;
+        errorCount = filesToProcess.length - currentCompleted;
+    } finally {
+        addProgressLog('=== 批量处理完成 ===');
+        updateOverallProgress(successCount, skippedCount, errorCount, filesToProcess.length);
+        updateProgress('全部完成!', 100);
+        updateConcurrentProgress(0);
+
+        isProcessing = false;
+        updateProcessButtonState(pdfFiles, isProcessing);
+        showResultsSection(successCount, skippedCount, errorCount, filesToProcess.length);
+        saveProcessedFilesRecord(processedFilesRecord);
+
+        allResults = allResults.filter(r => r !== undefined && r !== null);
+        console.log("Final results count:", allResults.length);
     }
 }
+
+// =====================
+// 下载处理
+// =====================
+function handleDownloadClick() {
+    if (allResults.length > 0) {
+        downloadAllResults(allResults);
+    } else {
+        showNotification('没有可下载的结果', 'warning');
+    }
+}
+
+// =====================
+// 内置提示模板获取
+// =====================
+function getBuiltInPrompts(languageName) {
+    const langLower = languageName.toLowerCase();
+    let sys_prompt = '';
+    let user_prompt_template = ''; // Use template literal placeholders
+    const sourceLang = 'English'; // Assume source is always English
+
+    switch (langLower) {
+        case 'chinese':
+            sys_prompt = "你是一个专业的文档翻译助手，擅长将文本精确翻译为简体中文，同时保留原始的 Markdown 格式。";
+            user_prompt_template = `请将以下内容翻译为 **简体中文**。\n要求:\n\n1. 保持所有 Markdown 语法元素不变（如 # 标题、 *斜体*、 **粗体**、 [链接]()、 ![图片]() 等）。\n2. 学术/专业术语应准确翻译。\n3. 保持原文的段落结构和格式。\n4. 仅输出翻译后的内容，不要包含任何额外的解释或注释。\n5. 对于行间公式，使用 $$...$$ 标记。\n\n文档内容:\n\n\${content}`;
+            break;
+        case 'japanese':
+            sys_prompt = "あなたはプロの文書翻訳アシスタントで、テキストを正確に日本語に翻訳し、元の Markdown 形式を維持することに長けています。";
+            user_prompt_template = `以下の内容を **日本語** に翻訳してください。\n要件:\n\n1. すべての Markdown 構文要素（例: # 見出し、 *イタリック*、 **太字**、 [リンク]()、 ![画像]() など）は変更しないでください。\n2. 学術/専門用語は正確に翻訳してください。\n3. 元の段落構造と書式を維持してください。\n4. 翻訳された内容のみを出力し、余分な説明や注釈は含めないでください。\n5. 表示数式には $$...$$ を使用してください。\n\nドキュメント内容:\n\n\${content}`;
+            break;
+        case 'korean':
+            sys_prompt = "당신은 전문 문서 번역 도우미로, 텍스트를 정확하게 한국어로 번역하고 원본 마크다운 형식을 유지하는 데 능숙합니다.";
+            user_prompt_template = `다음 내용을 **한국어** 로 번역해 주세요。\n요구 사항:\n\n1. 모든 마크다운 구문 요소(예: # 제목, *기울임꼴*, **굵게**, [링크](), ![이미지]() 등)를 변경하지 마십시오.\n2. 학술/전문 용어는 정확하게 번역하십시오.\n3. 원본 단락 구조와 서식을 유지하십시오.\n4. 번역된 내용만 출력하고 추가 설명이나 주석을 포함하지 마십시오.\n5. 수식 표시는 $$...$$ 를 사용하십시오。\n\n문서 내용:\n\n\${content}`;
+            break;
+        case 'french':
+            sys_prompt = "Vous êtes un assistant de traduction de documents professionnel, compétent pour traduire avec précision le texte en français tout en préservant le format Markdown d'origine.";
+            user_prompt_template = `Veuillez traduire le contenu suivant en **Français**。\nExigences:\n\n1. Conserver tous les éléments de syntaxe Markdown inchangés (par exemple, # titres, *italique*, **gras**, [liens](), ![images]()).\n2. Traduire avec précision les termes académiques/professionnels.\n3. Maintenir la structure et le formatage des paragraphes d'origine.\n4. Produire uniquement le contenu traduit, sans explications ni annotations supplémentaires.\n5. Pour les formules mathématiques, utiliser \$\$...\$\$.\n\nContenu du document:\n\n\${content}`;
+            break;
+        case 'english':
+            sys_prompt = "You are a professional document translation assistant, skilled at accurately translating text into English while preserving the original document format.";
+            user_prompt_template = `Please translate the following content into **English**.\n Requirements:\n\n 1. Keep all Markdown syntax elements unchanged (e.g., #headings, *italics*, **bold**, [links](), ![images]()).\n 2. Translate academic/professional terms accurately. Maintain a formal, academic tone.\n 3. Maintain the original paragraph structure and formatting.\n 4. Output only the translated content.\n 5. For display math formulas, use:\n \$\$\n ...\n \$\$\n\n Document Content:\n\n \${content}`;
+            break;
+        default: // Fallback for custom languages or other cases
+            const targetLangDisplayName = languageName; // Use the passed name directly
+            sys_prompt = `You are a professional document translation assistant, skilled at accurately translating content into ${targetLangDisplayName} while preserving the original document format.`;
+            // Revert to standard template literal with correct escaping
+            user_prompt_template = `Please translate the following content into **${targetLangDisplayName}**. \nRequirements:\n\n1. Keep all Markdown syntax elements unchanged (e.g., #headings, *italics*, **bold**, [links](), ![images]()).\n2. Translate academic/professional terms accurately. If necessary, keep the original term in parentheses if unsure about the translation in ${targetLangDisplayName}.\n3. Maintain the original paragraph structure and formatting.\n4. Translate only the content; do not add extra explanations.\n5. For display math formulas, use:\n\$\$\n...\n\$\$\n\nDocument Content:\n\n\${content}`;
+            break; // Ensure break statement is here
+    } // End of switch
+    return { systemPrompt: sys_prompt, userPromptTemplate: user_prompt_template };
+} // End of getBuiltInPrompts function
+
+// =====================
+// 提示区内容与状态联动
+// =====================
+function updatePromptTextareasContent() {
+    const useCustomCheckbox = document.getElementById('useCustomPromptsCheckbox');
+    const systemPromptTextarea = document.getElementById('defaultSystemPrompt');
+    const userPromptTextarea = document.getElementById('defaultUserPromptTemplate');
+    const currentSettings = loadSettings(); // Get current settings to access saved prompts
+    const targetLangValue = document.getElementById('targetLanguage').value;
+    const effectiveLangName = targetLangValue === 'custom' ? (document.getElementById('customTargetLanguageInput').value.trim() || 'English') : targetLangValue;
+    const promptsContainer = document.getElementById('customPromptsContainer'); // Get the container
+
+    if (useCustomCheckbox.checked) {
+        promptsContainer.classList.remove('hidden'); // Show the container
+        systemPromptTextarea.disabled = false; // Enable the textarea
+        userPromptTextarea.disabled = false; // Enable the textarea
+
+        const builtInPrompts = getBuiltInPrompts(effectiveLangName);
+        const savedSystemPrompt = currentSettings.defaultSystemPrompt;
+        const savedUserPrompt = currentSettings.defaultUserPromptTemplate;
+
+        // If saved prompt is empty or same as built-in, show built-in, else show saved
+        systemPromptTextarea.value = (savedSystemPrompt === null || savedSystemPrompt.trim() === '' || savedSystemPrompt === builtInPrompts.systemPrompt)
+            ? builtInPrompts.systemPrompt
+            : savedSystemPrompt;
+
+        userPromptTextarea.value = (savedUserPrompt === null || savedUserPrompt.trim() === '' || savedUserPrompt === builtInPrompts.userPromptTemplate)
+            ? builtInPrompts.userPromptTemplate
+            : savedUserPrompt;
+
+    } else {
+        promptsContainer.classList.add('hidden'); // Hide the container
+        systemPromptTextarea.disabled = true; // Disable the textarea
+        userPromptTextarea.disabled = true; // Disable the textarea
+    }
+}
+
+// =====================
+// 其他协调逻辑
+// =====================
+// ...（如有其他 app.js 级别的协调逻辑，可在此补充）...

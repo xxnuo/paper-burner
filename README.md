@@ -1,5 +1,3 @@
-[加了多文件上传、简单的并发和重试机制]
-
 # Paper Burner - PDF文档OCR与翻译工具
 
 <div align="center">
@@ -87,6 +85,9 @@ Paper Burner是为广大研究生和研究人员设计的PDF文档处理工具�
 
 
 <div align="center">
-  <p>由 <a href="https://baoyu.space/">Bao Yu</a> 开发 © 2025</p>
   <p>如果这个工具对您有帮助，请考虑给项目一个⭐</p>
+  <p>Contributors</p>
+  <a href="https://github.com/baoyudu/paper-burner/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=baoyudu/paper-burner" />
+  </a>
 </div>
