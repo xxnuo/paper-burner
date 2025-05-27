@@ -756,17 +756,12 @@ async function translateMarkdown(markdownText, targetLang, model, apiKey) {
         const actualLang = lang === 'chinese' ? 'zh' : lang;
 
         // 构建统一的翻译提示词
-        const translationPromptTemplate = `请将以下${actualLang === 'zh' ? '英文' : '中文'}内容翻译为${actualLang === 'zh' ? '中文' : '英文'}，
+        const translationPromptTemplate = `请将以下内容翻译为中文，
         要求：
-
-1. 保持所有Markdown语法元素不变（如#标题, *斜体*, **粗体**, [链接](), ![图片]()等）
-
+1. 保持所有Markdown语法元素不变
 2. 学术/专业术语应准确翻译，必要时可保留英文原文在括号中
-
 3. 保持原文的段落结构和格式
-
 4. 仅翻译内容，不要添加额外解释 
-
 5. 对于行间公式，使用：
 $$
 ...
@@ -778,7 +773,7 @@ $$
 ${content}`;
 
         //对温度等参数做统一默认设置, 若未单独设置, 则使用默认值
-        const temperature = 0.5;
+        const temperature = 0.1;
         const maxTokens = 8192;
         const sys_prompt = "你是一个专业的文档翻译助手，擅长保持原文档格式进行精确翻译。";
         
