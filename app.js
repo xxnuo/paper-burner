@@ -798,7 +798,7 @@ ${content}`;
                 responseExtractor: (data) => data.choices[0].message.content
             },
             'gemini': {
-                endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+                endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
                 modelName: 'Google Gemini 2.0 Flash',
                 headers: { 'Content-Type': 'application/json' },
                 bodyBuilder: () => ({
