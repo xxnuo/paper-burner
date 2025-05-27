@@ -1085,7 +1085,7 @@ function splitMarkdownIntoChunks(markdown) {
     // 估计每个标记的平均长度
     const estimatedTokens = estimateTokenCount(markdown);
     // 从用户设置获取最大token数限制
-    const tokenLimit = parseInt(maxTokensPerChunk.value) || 2000;
+    const tokenLimit = parseInt(maxTokensPerChunk.value) || 8192;
     
     // 如果文档足够小，不需要分割
     if (estimatedTokens <= tokenLimit) {
