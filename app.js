@@ -799,7 +799,7 @@ ${content}`;
             },
             'gemini': {
                 endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
-                modelName: 'Google Gemini 2.0 Flash',
+                modelName: 'Google Gemini 2.5 Flash',
                 headers: { 'Content-Type': 'application/json' },
                 bodyBuilder: () => ({
                     contents: [
