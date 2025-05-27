@@ -1308,8 +1308,8 @@ downloadTranslationWithImages = async () => {
         
         // 直接添加声明到翻译内容
         const currentDate = new Date().toISOString().split('T')[0];
-        const headerDeclaration = `> *本文档由 Paper Burner 工具制作 (${currentDate})。内容由 AI 大模型翻译生成，不保证翻译内容的准确性和完整性。*\n\n`;
-        const footerDeclaration = `\n\n---\n> *免责声明：本文档内容由大模型API自动翻译生成，Paper Burner 工具不对翻译内容的准确性、完整性和合法性负责。*`;
+        const headerDeclaration = `> *内容由 AI 大模型翻译生成，不保证翻译内容的准确性和完整性。*\n\n`;
+        const footerDeclaration = ``;
         
         // 添加Markdown文件，包含声明
         const contentToDownload = headerDeclaration + translationContent + footerDeclaration;
