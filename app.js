@@ -198,7 +198,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     // 获取文档大小估计
                     const estimatedTokens = estimateTokenCount(markdownContent);
-                    const tokenLimit = 12000; // 设置一个安全的token限制
+                    const tokenLimit = 8192; // 设置一个安全的token限制
                     
                     if (estimatedTokens > tokenLimit) {
                         // 使用分段翻译
@@ -779,20 +779,20 @@ ${content}`;
 
         //对温度等参数做统一默认设置, 若未单独设置, 则使用默认值
         const temperature = 0.5;
-        const maxTokens = 100000;
+        const maxTokens = 8192;
         const sys_prompt = "你是一个专业的文档翻译助手，擅长保持原文档格式进行精确翻译。";
         
         // 配置各种翻译API
         const apiConfigs = {
             'deepseek': {
                 endpoint: 'https://api.deepseek.com/v1/chat/completions',
-                modelName: 'DeepSeek v3 (deepseek-v3)',
+                modelName: 'DeepSeek Chat (deepseek-chat)',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${key}`
                 },
                 bodyBuilder: () => ({
-                    model: "deepseek-v3",
+                    model: "deepseek-chat",
                     messages: [
                         { role: "system", content: sys_prompt },
                         { role: "user", content: translationPromptTemplate }
