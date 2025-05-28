@@ -198,7 +198,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     // 获取文档大小估计
                     const estimatedTokens = estimateTokenCount(markdownContent);
-                    const tokenLimit = 8192; // 设置一个安全的token限制
+                    const tokenLimit = 2000; // 设置一个安全的token限制
                     
                     if (estimatedTokens > tokenLimit) {
                         // 使用分段翻译
@@ -774,7 +774,7 @@ ${content}`;
 
         //对温度等参数做统一默认设置, 若未单独设置, 则使用默认值
         const temperature = 0.1;
-        const maxTokens = 8192;
+        const maxTokens = 2000;
         const sys_prompt = "你是一个专业的文档翻译助手，擅长保持原文档格式进行精确翻译。";
         
         // 配置各种翻译API
@@ -1080,7 +1080,7 @@ function splitMarkdownIntoChunks(markdown) {
     // 估计每个标记的平均长度
     const estimatedTokens = estimateTokenCount(markdown);
     // 从用户设置获取最大token数限制
-    const tokenLimit = parseInt(maxTokensPerChunk.value) || 8192;
+    const tokenLimit = parseInt(maxTokensPerChunk.value) || 2000;
     
     // 如果文档足够小，不需要分割
     if (estimatedTokens <= tokenLimit) {
